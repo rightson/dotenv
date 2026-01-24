@@ -82,7 +82,7 @@ bind({"ctrl", "alt", "cmd"}, "N", function()
         local currentScreen = win:screen()
         local nextScreen = currentScreen:next()
         local currentScreenFrame = currentScreen:frame()
-        
+
         local relativeX = (currentFrame.x - currentScreenFrame.x) / currentScreenFrame.w
         local relativeY = (currentFrame.y - currentScreenFrame.y) / currentScreenFrame.h
         local relativeW = currentFrame.w / currentScreenFrame.w
