@@ -11,7 +11,7 @@ alias scp 'scp -r'
 alias wget 'wget -c'
 alias tree 'tree -C'
 
-if (`uname` ==  "Linux" ) then
+if ( "$OSTYPE" == "linux" || "$OSTYPE" == "linux-gnu" ) then
     alias ls 'ls --color'
     alias grep 'grep --color'
     alias du1 'sudo du -h --max-depth 1'
