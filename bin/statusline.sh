@@ -4,11 +4,11 @@
 
 INPUT=$(cat)
 
-IFS=$'\t' read -r CWD MODE_NAME EFFORT CTX_PCT RATE_5H_PCT RATE_5H_RESET RATE_7D_RESET < <(
+IFS=$'\t' read -r CWD MODEL_NAME EFFORT CTX_PCT RATE_5H_PCT RATE_5H_RESET RATE_7D_RESET < <(
   echo "$INPUT" | jq -rj '
     [
       (.cwd // ""),
-      (.output_style.name // ""),
+      (.model.display_name // ""),
       (.effort.level // ""),
       (.context_window.used_percentage // 0 | floor | tostring),
       (.rate_limits.five_hour.used_percentage // 0 | floor | tostring),
@@ -50,7 +50,7 @@ BASENAME_CWD=$(basename "${CWD}")
 PARTS=()
 PARTS+=("📁 \033[32m${BASENAME_CWD}\033[0m")
 [[ -n "$BRANCH" ]]    && PARTS+=("🌿 \033[36m${BRANCH}\033[0m")
-[[ -n "$MODE_NAME" ]] && PARTS+=("🧠 \033[33m${MODE_NAME}\033[0m")
+[[ -n "$MODEL_NAME" ]] && PARTS+=("🧠 \033[33m${MODEL_NAME}\033[0m")
 [[ -n "$EFFORT" ]]    && PARTS+=("⚡ \033[33m${EFFORT}\033[0m")
 if   (( CTX_PCT < 25 )); then CTX_ICON="🟢"
 elif (( CTX_PCT < 50 )); then CTX_ICON="🟡"
