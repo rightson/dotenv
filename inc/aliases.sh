@@ -78,6 +78,8 @@ function tn () {
 }
 alias ta='tmux attach'
 alias tat='tmux attach -t'
+alias tmux-rename-window='tmux_rename_window'
+alias trw='tmux_rename_window'
 
 # apt aliases
 alias sau='sudo apt update'

@@ -68,6 +68,12 @@ function tmux_rename_pane() {
     printf '\033]2;%s\033\\' "$title"
 }
 
+function tmux_rename_window() {
+    local dir=${1:-$PWD}
+    local name=$(basename "$dir" | tr -c 'A-Za-z0-9._-' '-' | sed 's/-*$//')
+    tmux rename-window "$name"
+}
+
 function tmux_attach () {
     local session_name=$1
     tmux attach -t $session_name
