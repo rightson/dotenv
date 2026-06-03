@@ -71,6 +71,7 @@ alias tl 'tmux ls'
 alias tn 'tmux new -s'
 alias ta 'tmux attach'
 alias tat 'tmux attach -t'
+alias trw 'bash -c "source $ENV_ROOT/inc/tmux.sh; tmux_rename_window \!*"'
 
 # apt aliases
 alias sau 'sudo apt update'
