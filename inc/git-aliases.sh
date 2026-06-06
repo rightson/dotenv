@@ -212,6 +212,20 @@ alias gup='git pull --rebase'
 alias gupv='git pull --rebase -v'
 alias glum='git pull upstream master'
 
+gwd() {
+  # Go back to the worktree that has the repo's default branch checked out.
+  local def path
+  def="$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)"
+  def="${def#origin/}"
+  [[ -n $def ]] || def="$(git config --get init.defaultBranch)"
+  [[ -n $def ]] || { git show-ref --verify --quiet refs/heads/main && def=main || def=master; }
+  path="$(git worktree list --porcelain | awk -v b="refs/heads/$def" '
+    /^worktree /{p=substr($0,10)}
+    $0=="branch "b{print p; exit}')"
+  [[ -n $path ]] || { echo "No worktree on default branch '$def'."; return 1; }
+  cd "$path"
+}
+
 alias gwch='git whatchanged -p --abbrev-commit --pretty=medium'
 alias gwip='git add -A; git rm $(git ls-files --deleted) 2> /dev/null; git commit -m "--wip--"'
 
