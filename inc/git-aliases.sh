@@ -214,6 +214,35 @@ alias glum='git pull upstream master'
 
 alias gwl='git worktree list'
 
+gwls() {
+  # git worktree list, but the path column is shown relative to CWD (shorter).
+  git worktree list --porcelain | awk -v base="$PWD" '
+    function relpath(target,   t, b, n, m, i, j, common, rel) {
+      n = split(target, t, "/"); m = split(base, b, "/")
+      i = 1
+      while (i <= n && i <= m && t[i] == b[i]) i++
+      common = i; rel = ""
+      for (j = common; j <= m; j++) rel = rel "../"
+      for (j = common; j <= n; j++) rel = rel t[j] (j < n ? "/" : "")
+      return (rel == "") ? "." : rel
+    }
+    function emit(   p) {
+      p = relpath(path)
+      paths[++r] = p; shas[r] = sha; refs[r] = ref
+      if (length(p) > w) w = length(p)
+    }
+    /^worktree /{ if (r >= 0 && path != "") emit(); path = substr($0, 10); sha = ""; ref = "" }
+    /^HEAD /{ sha = substr($0, 6, 7) }
+    /^branch /{ b = substr($0, 8); sub("refs/heads/", "", b); ref = "[" b "]" }
+    /^detached$/{ ref = "(detached HEAD)" }
+    /^bare$/{ ref = "(bare)" }
+    END {
+      if (path != "") emit()
+      for (i = 1; i <= r; i++) printf "%-*s  %s  %s\n", w, paths[i], shas[i], refs[i]
+    }
+  '
+}
+
 gwd() {
   # Go back to the worktree that has the repo's default branch checked out.
   local def path
