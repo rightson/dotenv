@@ -212,6 +212,8 @@ alias gup='git pull --rebase'
 alias gupv='git pull --rebase -v'
 alias glum='git pull upstream master'
 
+alias gwl='git worktree list'
+
 gwd() {
   # Go back to the worktree that has the repo's default branch checked out.
   local def path
