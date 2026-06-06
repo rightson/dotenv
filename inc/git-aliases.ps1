@@ -245,7 +245,7 @@ function gwd {
     Set-Location $path
 }
 
-function gwlmerged {
+function gwls-merged {
     # List worktrees whose branch is already merged into the default branch.
     # `git worktree prune` never removes these (their directories still exist),
     # so they are the manual-cleanup candidates. Run `gfp` first for accuracy.
@@ -263,7 +263,7 @@ function gwlmerged {
     }
 }
 
-function gwlgone {
+function gwls-gone {
     # List worktrees whose upstream branch was deleted on the remote ([gone]).
     # Run `gfp` (git fetch --all --prune) first so the tracking info is current.
     $p = $null

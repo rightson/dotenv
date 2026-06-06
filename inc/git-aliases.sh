@@ -266,43 +266,47 @@ gwls() {
 
 gwd() {
   # Go back to the worktree that has the repo's default branch checked out.
-  local def path
+  # Note: avoid a local named `path` — in zsh it is tied to the $PATH array,
+  # so `local path` would blank out PATH inside the function.
+  local def wt
   def="$(_git_default_branch)"
-  path="$(git worktree list --porcelain | awk -v b="refs/heads/$def" '
+  wt="$(git worktree list --porcelain | awk -v b="refs/heads/$def" '
     /^worktree /{p=substr($0,10)}
     $0=="branch "b{print p; exit}')"
-  [[ -n $path ]] || { echo "No worktree on default branch '$def'."; return 1; }
-  cd "$path"
+  [[ -n $wt ]] || { echo "No worktree on default branch '$def'."; return 1; }
+  cd "$wt"
 }
 
-gwlmerged() {
+gwls-merged() {
   # List worktrees whose branch is already merged into the default branch.
   # `git worktree prune` never removes these (their directories still exist),
   # so they are the manual-cleanup candidates. Run `gfa` first for accuracy.
-  local def ref path br
+  # Note: the local is `wt`, not `path` — in zsh `local path` blanks out $PATH.
+  local def ref wt br
   def="$(_git_default_branch)"
   ref="$(_git_default_ref "$def")"
   git worktree list --porcelain | awk '
     /^worktree /{p=substr($0,10)}
     /^branch /{b=substr($0,8); sub("refs/heads/","",b); print p"\t"b}
-  ' | while IFS=$'\t' read -r path br; do
+  ' | while IFS=$'\t' read -r wt br; do
     [[ "$br" == "$def" ]] && continue
     if git merge-base --is-ancestor "refs/heads/$br" "$ref" 2>/dev/null; then
-      printf '%-50s [%s]\n' "$path" "$br"
+      printf '%-50s [%s]\n' "$wt" "$br"
     fi
   done
 }
 
-gwlgone() {
+gwls-gone() {
   # List worktrees whose upstream branch was deleted on the remote ([gone]).
   # Run `gfa` (git fetch --all --prune) first so the tracking info is current.
-  local path br up
+  # Note: the local is `wt`, not `path` — in zsh `local path` blanks out $PATH.
+  local wt br up
   git worktree list --porcelain | awk '
     /^worktree /{p=substr($0,10)}
     /^branch /{b=substr($0,8); sub("refs/heads/","",b); print p"\t"b}
-  ' | while IFS=$'\t' read -r path br; do
+  ' | while IFS=$'\t' read -r wt br; do
     up="$(git for-each-ref --format='%(upstream:track)' "refs/heads/$br" 2>/dev/null)"
-    [[ "$up" == "[gone]" ]] && printf '%-50s [%s]\n' "$path" "$br"
+    [[ "$up" == "[gone]" ]] && printf '%-50s [%s]\n' "$wt" "$br"
   done
 }
 
