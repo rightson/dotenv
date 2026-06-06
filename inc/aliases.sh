@@ -121,3 +121,6 @@ function td () {
     echo tmux new $name -d ${cmd[@]}
     tmux new $name -d ${cmd[@]}
 }
+
+# claude aliases
+alias claude.agents='claude agents --cwd .'
