@@ -212,6 +212,137 @@ alias gup='git pull --rebase'
 alias gupv='git pull --rebase -v'
 alias glum='git pull upstream master'
 
+_git_default_branch() {
+  # Best-effort name of the repo's default branch (no "origin/" prefix).
+  local def
+  def="$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)"
+  def="${def#origin/}"
+  [[ -n $def ]] || def="$(git config --get init.defaultBranch)"
+  [[ -n $def ]] || { git show-ref --verify --quiet refs/heads/main && def=main || def=master; }
+  printf '%s\n' "$def"
+}
+
+# Resolve the local ref to compare against (default branch), falling back to
+# the remote-tracking ref when there is no local branch for it.
+_git_default_ref() {
+  local def="$1"
+  if git show-ref --verify --quiet "refs/heads/$def"; then
+    printf 'refs/heads/%s\n' "$def"
+  else
+    printf 'refs/remotes/origin/%s\n' "$def"
+  fi
+}
+
+alias gwl='git worktree list'
+
+gwls() {
+  # git worktree list, but the path column is shown relative to CWD (shorter).
+  git worktree list --porcelain | awk -v base="$PWD" '
+    function relpath(target,   t, b, n, m, i, j, common, rel) {
+      n = split(target, t, "/"); m = split(base, b, "/")
+      i = 1
+      while (i <= n && i <= m && t[i] == b[i]) i++
+      common = i; rel = ""
+      for (j = common; j <= m; j++) rel = rel "../"
+      for (j = common; j <= n; j++) rel = rel t[j] (j < n ? "/" : "")
+      return (rel == "") ? "." : rel
+    }
+    function emit(   p) {
+      p = relpath(path)
+      paths[++r] = p; shas[r] = sha; refs[r] = ref
+      if (length(p) > w) w = length(p)
+    }
+    /^worktree /{ if (r >= 0 && path != "") emit(); path = substr($0, 10); sha = ""; ref = "" }
+    /^HEAD /{ sha = substr($0, 6, 7) }
+    /^branch /{ b = substr($0, 8); sub("refs/heads/", "", b); ref = "[" b "]" }
+    /^detached$/{ ref = "(detached HEAD)" }
+    /^bare$/{ ref = "(bare)" }
+    END {
+      if (path != "") emit()
+      for (i = 1; i <= r; i++) printf "%-*s  %s  %s\n", w, paths[i], shas[i], refs[i]
+    }
+  '
+}
+
+gwd() {
+  # Go back to the worktree that has the repo's default branch checked out.
+  local def path
+  def="$(_git_default_branch)"
+  path="$(git worktree list --porcelain | awk -v b="refs/heads/$def" '
+    /^worktree /{p=substr($0,10)}
+    $0=="branch "b{print p; exit}')"
+  [[ -n $path ]] || { echo "No worktree on default branch '$def'."; return 1; }
+  cd "$path"
+}
+
+gwlmerged() {
+  # List worktrees whose branch is already merged into the default branch.
+  # `git worktree prune` never removes these (their directories still exist),
+  # so they are the manual-cleanup candidates. Run `gfa` first for accuracy.
+  local def ref path br
+  def="$(_git_default_branch)"
+  ref="$(_git_default_ref "$def")"
+  git worktree list --porcelain | awk '
+    /^worktree /{p=substr($0,10)}
+    /^branch /{b=substr($0,8); sub("refs/heads/","",b); print p"\t"b}
+  ' | while IFS=$'\t' read -r path br; do
+    [[ "$br" == "$def" ]] && continue
+    if git merge-base --is-ancestor "refs/heads/$br" "$ref" 2>/dev/null; then
+      printf '%-50s [%s]\n' "$path" "$br"
+    fi
+  done
+}
+
+gwlgone() {
+  # List worktrees whose upstream branch was deleted on the remote ([gone]).
+  # Run `gfa` (git fetch --all --prune) first so the tracking info is current.
+  local path br up
+  git worktree list --porcelain | awk '
+    /^worktree /{p=substr($0,10)}
+    /^branch /{b=substr($0,8); sub("refs/heads/","",b); print p"\t"b}
+  ' | while IFS=$'\t' read -r path br; do
+    up="$(git for-each-ref --format='%(upstream:track)' "refs/heads/$br" 2>/dev/null)"
+    [[ "$up" == "[gone]" ]] && printf '%-50s [%s]\n' "$path" "$br"
+  done
+}
+
+gwa() {
+  # Add a worktree for BRANCH alongside the repo root (../<branch>).
+  # Checks out an existing branch, or creates it off the default branch.
+  local br="$1" root dest
+  [[ -n $br ]] || { echo "Usage: gwa <branch>"; return 2; }
+  root="$(git rev-parse --show-toplevel)" || return
+  dest="$(dirname "$root")/$br"
+  if git show-ref --verify --quiet "refs/heads/$br"; then
+    git worktree add "$dest" "$br"
+  else
+    git worktree add -b "$br" "$dest" "$(_git_default_branch)"
+  fi
+}
+
+gwb() {
+  # Create a worktree on a NEW branch off the default branch.
+  local br="$1" root
+  [[ -n $br ]] || { echo "Usage: gwb <new-branch>"; return 2; }
+  root="$(git rev-parse --show-toplevel)" || return
+  git worktree add -b "$br" "$(dirname "$root")/$br" "$(_git_default_branch)"
+}
+
+gwrm() {
+  # Remove the current (or named) worktree, then cd back to the default one.
+  local target main
+  target="$(cd "${1:-$PWD}" 2>/dev/null && git rev-parse --show-toplevel)" \
+    || { echo "Not a worktree: ${1:-$PWD}"; return 1; }
+  main="$(git worktree list --porcelain | awk '/^worktree /{print substr($0,10); exit}')"
+  [[ "$target" == "$main" ]] && { echo "Refusing to remove the main worktree."; return 1; }
+  gwd 2>/dev/null || cd "$main"
+  git worktree remove "$target"
+}
+
+alias gwprune='git worktree prune -v'
+alias gwlock='git worktree lock'
+alias gwunlock='git worktree unlock'
+
 alias gwch='git whatchanged -p --abbrev-commit --pretty=medium'
 alias gwip='git add -A; git rm $(git ls-files --deleted) 2> /dev/null; git commit -m "--wip--"'
 
