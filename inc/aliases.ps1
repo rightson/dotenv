@@ -467,4 +467,10 @@ function touch {
     }
 }
 
+# --- docker aliases ---
+function docker.ps { docker ps --format 'table {{.ID}}\t{{.Names}}' $args }
+
+# --- claude aliases ---
+function claude.agents { claude agents --cwd . $args }
+
 # --- End of Aliases ---
