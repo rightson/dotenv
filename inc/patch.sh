@@ -87,18 +87,19 @@ function patch_shell_rc() {
     echo "$rc patched"
 }
 
-function patch_tmux_mouse() {
-    # Idempotently ensure the mouse settings exist in an already-patched
-    # ~/.tmux.conf (newer than the original seed block). Safe to re-run.
+function patch_tmux_settings() {
+    # Idempotently ensure newer tmux settings exist in an already-patched
+    # ~/.tmux.conf (added after the original seed block). Safe to re-run.
     local target_root="${TARGET_ROOT:-$HOME}"
     local tmuxrc=$target_root/.tmux.conf
     if [ ! -f "$tmuxrc" ]; then
         echo "$tmuxrc not found; run patch_tmux_rc first"
         return
     fi
-    echo "Ensuring tmux mouse settings in $tmuxrc ..."
+    echo "Ensuring tmux settings in $tmuxrc ..."
     ensure_line_in_file 'set -g mouse on' 'set -g mouse on' "$tmuxrc"
     ensure_line_in_file 'MouseDrag1Status' 'bind-key -n MouseDrag1Status swap-window -t=' "$tmuxrc"
+    ensure_line_in_file 'pane-border-lines' 'set -g pane-border-lines heavy' "$tmuxrc"
 }
 
 function patch_tmux_rc() {
@@ -109,7 +110,7 @@ function patch_tmux_rc() {
         cat "${ENV_ROOT}/seeds/tmux.conf" >> $tmuxrc
     else
         echo "$tmuxrc already patched"
-        patch_tmux_mouse
+        patch_tmux_settings
     fi
 
 }
