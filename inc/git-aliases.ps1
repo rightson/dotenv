@@ -183,3 +183,136 @@ function grba { git rebase --abort $args }
 function grbc { git rebase --continue $args }
 function gma { git merge --abort $args }
 function gmc { git merge --continue $args }
+
+# --- worktree helpers / aliases (mirror inc/git-aliases.sh) ---
+
+function _git_default_branch {
+    # Best-effort name of the repo's default branch (no "origin/" prefix).
+    $def = (git symbolic-ref --short refs/remotes/origin/HEAD 2>$null)
+    if ($def) { $def = $def -replace '^origin/', '' }
+    if (-not $def) { $def = (git config --get init.defaultBranch) }
+    if (-not $def) {
+        git show-ref --verify --quiet refs/heads/main
+        if ($LASTEXITCODE -eq 0) { $def = 'main' } else { $def = 'master' }
+    }
+    return $def
+}
+
+function _git_default_ref {
+    # Resolve the local ref to compare against (default branch), falling back to
+    # the remote-tracking ref when there is no local branch for it.
+    param($def)
+    git show-ref --verify --quiet "refs/heads/$def"
+    if ($LASTEXITCODE -eq 0) { return "refs/heads/$def" } else { return "refs/remotes/origin/$def" }
+}
+
+function gwl { git worktree list $args }
+
+function gwls {
+    # git worktree list, but the path column is shown relative to CWD (shorter).
+    $entries = @()
+    $path = $null; $sha = ''; $ref = ''
+    foreach ($line in (git worktree list --porcelain)) {
+        if ($line -like 'worktree *') {
+            if ($path) { $entries += [pscustomobject]@{ Path = $path; Sha = $sha; Ref = $ref } }
+            $path = $line.Substring(9); $sha = ''; $ref = ''
+        }
+        elseif ($line -like 'HEAD *') { $sha = $line.Substring(5, 7) }
+        elseif ($line -like 'branch *') { $ref = '[' + ($line.Substring(7) -replace '^refs/heads/', '') + ']' }
+        elseif ($line -eq 'detached') { $ref = '(detached HEAD)' }
+        elseif ($line -eq 'bare') { $ref = '(bare)' }
+    }
+    if ($path) { $entries += [pscustomobject]@{ Path = $path; Sha = $sha; Ref = $ref } }
+
+    $rel = foreach ($e in $entries) {
+        $r = Resolve-Path -LiteralPath $e.Path -Relative -ErrorAction SilentlyContinue
+        if (-not $r) { $r = $e.Path }
+        [pscustomobject]@{ Path = "$r"; Sha = $e.Sha; Ref = $e.Ref }
+    }
+    $w = ($rel | ForEach-Object { $_.Path.Length } | Measure-Object -Maximum).Maximum
+    foreach ($e in $rel) { '{0}  {1}  {2}' -f $e.Path.PadRight($w), $e.Sha, $e.Ref }
+}
+
+function gwd {
+    # Go back to the worktree that has the repo's default branch checked out.
+    $def = _git_default_branch
+    $path = $null; $p = $null
+    foreach ($line in (git worktree list --porcelain)) {
+        if ($line -like 'worktree *') { $p = $line.Substring(9) }
+        elseif ($line -eq "branch refs/heads/$def") { $path = $p; break }
+    }
+    if (-not $path) { Write-Error "No worktree on $def"; return }
+    Set-Location $path
+}
+
+function gwlmerged {
+    # List worktrees whose branch is already merged into the default branch.
+    # `git worktree prune` never removes these (their directories still exist),
+    # so they are the manual-cleanup candidates. Run `gfp` first for accuracy.
+    $def = _git_default_branch
+    $ref = _git_default_ref $def
+    $p = $null
+    foreach ($line in (git worktree list --porcelain)) {
+        if ($line -like 'worktree *') { $p = $line.Substring(9) }
+        elseif ($line -like 'branch *') {
+            $br = $line.Substring(7) -replace '^refs/heads/', ''
+            if ($br -eq $def) { continue }
+            git merge-base --is-ancestor "refs/heads/$br" $ref 2>$null
+            if ($LASTEXITCODE -eq 0) { '{0}  [{1}]' -f $p.PadRight(50), $br }
+        }
+    }
+}
+
+function gwlgone {
+    # List worktrees whose upstream branch was deleted on the remote ([gone]).
+    # Run `gfp` (git fetch --all --prune) first so the tracking info is current.
+    $p = $null
+    foreach ($line in (git worktree list --porcelain)) {
+        if ($line -like 'worktree *') { $p = $line.Substring(9) }
+        elseif ($line -like 'branch *') {
+            $br = $line.Substring(7) -replace '^refs/heads/', ''
+            $up = git for-each-ref --format='%(upstream:track)' "refs/heads/$br" 2>$null
+            if ($up -eq '[gone]') { '{0}  [{1}]' -f $p.PadRight(50), $br }
+        }
+    }
+}
+
+function gwa {
+    # Add a worktree for BRANCH alongside the repo root (../<branch>).
+    # Checks out an existing branch, or creates it off the default branch.
+    param($br)
+    if (-not $br) { Write-Host 'Usage: gwa <branch>'; return }
+    $root = git rev-parse --show-toplevel
+    if (-not $root) { return }
+    $dest = Join-Path (Split-Path $root -Parent) $br
+    git show-ref --verify --quiet "refs/heads/$br"
+    if ($LASTEXITCODE -eq 0) { git worktree add $dest $br }
+    else { git worktree add -b $br $dest (_git_default_branch) }
+}
+
+function gwb {
+    # Create a worktree on a NEW branch off the default branch.
+    param($br)
+    if (-not $br) { Write-Host 'Usage: gwb <new-branch>'; return }
+    $root = git rev-parse --show-toplevel
+    if (-not $root) { return }
+    git worktree add -b $br (Join-Path (Split-Path $root -Parent) $br) (_git_default_branch)
+}
+
+function gwrm {
+    # Remove the current (or named) worktree, then cd back to the default one.
+    param($dir = $PWD.Path)
+    $target = git -C $dir rev-parse --show-toplevel 2>$null
+    if (-not $target) { Write-Error "Not a worktree: $dir"; return }
+    $main = $null
+    foreach ($line in (git worktree list --porcelain)) {
+        if ($line -like 'worktree *') { $main = $line.Substring(9); break }
+    }
+    if ($target -eq $main) { Write-Error 'Refusing to remove the main worktree.'; return }
+    gwd 2>$null
+    git worktree remove $target
+}
+
+function gwprune { git worktree prune -v $args }
+function gwlock { git worktree lock $args }
+function gwunlock { git worktree unlock $args }
