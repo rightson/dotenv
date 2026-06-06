@@ -124,3 +124,5 @@ function td () {
 
 # docker aliases
 alias docker.ps='docker ps --format "table {{.ID}}\t{{.Names}}"'
+# claude aliases
+alias claude.agents='claude agents --cwd .'

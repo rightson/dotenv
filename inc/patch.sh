@@ -13,6 +13,20 @@ function get_line_number() {
     grep -n "$pattern" "$file" | cut -d: -f1
 }
 
+function ensure_line_in_file() {
+    if [ "$1" = "" ] || [ "$3" = "" ]; then
+        echo "Usage: ensure_line_in_file <match-pattern> <line> <file>"
+        return
+    fi
+    local pattern="$1"
+    local line="$2"
+    local file="$3"
+    if ! grep -qF "$pattern" "$file" 2> /dev/null; then
+        echo "$line" >> "$file"
+        echo "  + $line"
+    fi
+}
+
 function get_shell_rc_path() {
     local target_root="${TARGET_ROOT:-$HOME}"
     case "$1" in
@@ -73,6 +87,21 @@ function patch_shell_rc() {
     echo "$rc patched"
 }
 
+function patch_tmux_settings() {
+    # Idempotently ensure newer tmux settings exist in an already-patched
+    # ~/.tmux.conf (added after the original seed block). Safe to re-run.
+    local target_root="${TARGET_ROOT:-$HOME}"
+    local tmuxrc=$target_root/.tmux.conf
+    if [ ! -f "$tmuxrc" ]; then
+        echo "$tmuxrc not found; run patch_tmux_rc first"
+        return
+    fi
+    echo "Ensuring tmux settings in $tmuxrc ..."
+    ensure_line_in_file 'set -g mouse on' 'set -g mouse on' "$tmuxrc"
+    ensure_line_in_file 'MouseDrag1Status' 'bind-key -n MouseDrag1Status swap-window -t=' "$tmuxrc"
+    ensure_line_in_file 'pane-border-lines' 'set -g pane-border-lines heavy' "$tmuxrc"
+}
+
 function patch_tmux_rc() {
     local target_root="${TARGET_ROOT:-$HOME}"
     local tmuxrc=$target_root/.tmux.conf
@@ -81,6 +110,7 @@ function patch_tmux_rc() {
         cat "${ENV_ROOT}/seeds/tmux.conf" >> $tmuxrc
     else
         echo "$tmuxrc already patched"
+        patch_tmux_settings
     fi
 
 }
