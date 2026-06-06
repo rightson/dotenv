@@ -121,3 +121,6 @@ function td () {
     echo tmux new $name -d ${cmd[@]}
     tmux new $name -d ${cmd[@]}
 }
+
+# docker aliases
+alias docker.ps='docker ps --format "table {{.ID}}\t{{.Names}}"'
