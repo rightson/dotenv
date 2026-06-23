@@ -44,6 +44,45 @@ function install_nvm() {
     fi
 }
 
+function install_vscode() {
+    local os url file
+    os="$(uname -s)"
+    case "$os" in
+        Linux)
+            url="https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64"
+            file="vscode-stable-amd64.deb"
+            ;;
+        Darwin)
+            if [ "$(uname -m)" = "arm64" ]; then
+                url="https://code.visualstudio.com/sha/download?build=stable&os=darwin-arm64-dmg"
+            else
+                url="https://code.visualstudio.com/sha/download?build=stable&os=darwin-dmg"
+            fi
+            file="vscode-stable.dmg"
+            ;;
+        *)
+            echo "Unsupported OS: $os"
+            return 1
+            ;;
+    esac
+
+    rm -f "./$file"
+    wget -O "$file" "$url" || { rm -f "./$file"; return 1; }
+
+    case "$os" in
+        Linux)
+            sudo apt install -y "./$file"
+            rm -f "./$file"
+            ;;
+        Darwin)
+            hdiutil attach "./$file" -quiet
+            cp -R "/Volumes/Visual Studio Code/Visual Studio Code.app" /Applications/
+            hdiutil detach "/Volumes/Visual Studio Code" -quiet
+            rm -f "./$file"
+            ;;
+    esac
+}
+
 function install_chrome_from_deb() {
     local file=google-chrome-stable_current_amd64.deb
     local url=https://dl.google.com/linux/direct/$file
