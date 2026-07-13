@@ -61,9 +61,10 @@ alias public-ip 'curl ipinfo.io/ip'
 alias py python
 alias py3 python3
 
-# venv aliasees
-alias venv.create 'python3 -m venv venv; venv/bin/pip install --upgrade pip'
-alias venv.activate 'source venv/bin/activate.csh'
+# project virtual environments
+alias venv.create 'python3 -m venv .venv && .venv/bin/pip install --upgrade pip'
+alias venv.activate 'source "$ENV_ROOT/inc/tcsh/venv-activate.csh"'
+alias venv.migrate 'python3 "$ENV_ROOT/bin/venv-migrate.py"'
 
 # tmux aliases
 alias t 'tmux'

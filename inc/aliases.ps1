@@ -341,11 +341,14 @@ function public-ip {
 Set-Alias py python
 Set-Alias py3 python3
 
-# --- venv aliases (already provided) ---
+# --- project virtual environments ---
 function Create-PythonVenv {
-    param([string]$VenvName = "venv")
+    param([string]$VenvName = ".venv")
     try {
         python -m venv $VenvName
+        if ($LASTEXITCODE -ne 0) { throw "python -m venv exited with code $LASTEXITCODE" }
+        & (Join-Path $VenvName "Scripts\python.exe") -m pip install --upgrade pip
+        if ($LASTEXITCODE -ne 0) { throw "pip upgrade exited with code $LASTEXITCODE" }
         Write-Host "Virtual environment '$VenvName' created successfully."
     }
     catch {
@@ -355,8 +358,16 @@ function Create-PythonVenv {
 Set-Alias venv.create Create-PythonVenv
 
 function Activate-PythonVenv {
-    param([string]$VenvName = "venv")
+    param([string]$VenvName = ".venv")
     $activatePath = Join-Path $VenvName "Scripts\Activate.ps1"
+    if ($VenvName -eq ".venv" -and -not (Test-Path $activatePath)) {
+        $legacyActivatePath = Join-Path "venv" "Scripts\Activate.ps1"
+        if (Test-Path $legacyActivatePath) {
+            Write-Warning "Legacy .\venv detected; activating it for compatibility. Run venv.migrate, then rerun venv.activate. New environments use .\.venv."
+            $VenvName = "venv"
+            $activatePath = $legacyActivatePath
+        }
+    }
     if (Test-Path $activatePath) {
         & $activatePath
         Write-Host "Virtual environment '$VenvName' activated."
@@ -366,6 +377,15 @@ function Activate-PythonVenv {
     }
 }
 Set-Alias venv.activate Activate-PythonVenv
+
+function Migrate-PythonVenv {
+    $migrationScript = Join-Path (Split-Path -Parent $PSScriptRoot) "bin\venv-migrate.py"
+    python $migrationScript
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Virtual environment migration failed. The legacy .\venv was left unchanged."
+    }
+}
+Set-Alias venv.migrate Migrate-PythonVenv
 
 # --- tmux aliases (no direct Windows equivalent) ---
 Set-Alias t tmux

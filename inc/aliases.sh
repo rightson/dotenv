@@ -61,9 +61,35 @@ alias public-ip='curl ipinfo.io/ip'
 alias py=python
 alias py3=python3
 
-# venv aliasees
-alias venv.create='python3 -m venv venv; venv/bin/pip install --upgrade pip'
-alias venv.activate='source venv/bin/activate'
+# project virtual environments
+function _project_venv_create() {
+    local venv_name="${1:-.venv}"
+    python3 -m venv "$venv_name" && "$venv_name/bin/pip" install --upgrade pip
+}
+
+function _project_venv_activate() {
+    local venv_name="${1:-.venv}"
+
+    if [ -f "$venv_name/bin/activate" ]; then
+        source "$venv_name/bin/activate"
+    elif [ "$venv_name" = ".venv" ] && [ -f "venv/bin/activate" ]; then
+        printf '%s\n' \
+            '[venv.activate] Warning: legacy ./venv detected; activating it for compatibility.' \
+            '[venv.activate] Run venv.migrate, then rerun venv.activate. New environments use ./.venv.' >&2
+        source venv/bin/activate
+    else
+        printf '[venv.activate] Virtual environment %s was not found. Run venv.create first.\n' "$venv_name" >&2
+        return 1
+    fi
+}
+
+function _project_venv_migrate() {
+    python3 "$ENV_ROOT/bin/venv-migrate.py"
+}
+
+alias venv.create='_project_venv_create'
+alias venv.activate='_project_venv_activate'
+alias venv.migrate='_project_venv_migrate'
 
 # tmux aliases
 alias t='tmux'
