@@ -7,6 +7,8 @@ Opinionated dotfiles bootstrapper for bash/zsh/tcsh with Vim/Neovim, tmux, and o
 - Backups your shell rc before patching and keeps templates in `seeds/` so you can tweak them safely.
 - Installs helper tooling for you: `vim-plug`, `tmux-tpm`, and `fzf` (plus helper for `nvm`).
 - Curated aliases, prompts, history settings, and utilities live under `inc/` and `bin/`.
+- Project virtualenv helpers use `.venv` by default: `venv.create`, `venv.activate`, and
+  `venv.migrate` (which safely rebuilds a legacy `venv` directory as `.venv`).
 - Cross-platform: Linux/macOS shell scripts and a PowerShell profile patcher for Windows.
 
 ## Quick start
