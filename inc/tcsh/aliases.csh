@@ -62,8 +62,8 @@ alias py python
 alias py3 python3
 
 # project virtual environments
-alias venv.create 'python3 -m venv .venv && .venv/bin/pip install --upgrade pip'
-alias venv.activate 'source "$ENV_ROOT/inc/tcsh/venv-activate.csh"'
+alias venv.create 'source "$ENV_ROOT/inc/tcsh/venv-create.csh" \!*'
+alias venv.activate 'source "$ENV_ROOT/inc/tcsh/venv-activate.csh" \!*'
 alias venv.migrate 'python3 "$ENV_ROOT/bin/venv-migrate.py"'
 
 # tmux aliases
