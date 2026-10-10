@@ -115,21 +115,26 @@ function patch_tmux_rc() {
 
 }
 
+function get_patched_vimrc() {
+    local target_root="${TARGET_ROOT:-$HOME}"
+    echo -e "\n\" $ENV_BLOCK_HEAD"
+    echo "\" =Begin="
+    echo "let g:target_root = '$target_root'"
+    echo "source $ENV_ROOT/vim/plug.vimrc"
+    echo "\" Update local Plug at $target_root/.vimrc.plug"
+    echo "source $ENV_ROOT/vim/helpers.vimrc"
+    echo "source $ENV_ROOT/vim/hotkeys.vimrc"
+    echo "source $ENV_ROOT/vim/setting.vimrc"
+    echo "\" =END="
+}
+
 function patch_vim_rc() {
     local target_root="${TARGET_ROOT:-$HOME}"
     local vimrc=$target_root/.vimrc
     local local_vimrc=$target_root/.vimrc.plug
     if [ "`grep \"$ENV_BLOCK_HEAD\" $vimrc 2> /dev/null`" = "" ]; then
         echo "Patching $vimrc ..."
-        echo -e "\n\" $ENV_BLOCK_HEAD" >> $vimrc
-        echo "\" =Begin=" >> $vimrc
-        echo "let g:target_root = '$target_root'" >> $vimrc
-        echo "source $ENV_ROOT/vim/plug.vimrc" >> $vimrc
-        echo "\" Update local Plug at $local_vimrc" >> $vimrc
-        echo "source $ENV_ROOT/vim/helpers.vimrc" >> $vimrc
-        echo "source $ENV_ROOT/vim/hotkeys.vimrc" >> $vimrc
-        echo "source $ENV_ROOT/vim/setting.vimrc" >> $vimrc
-        echo "\" =END=" >> $vimrc
+        get_patched_vimrc >> $vimrc
 	touch $local_vimrc
     else
         echo "$vimrc already patched"
@@ -224,6 +229,51 @@ function patch_karabiner() {
     fi
 }
 
+# Print seed lines ("<key> <type> <value>") whose current value differs
+function get_scroll_reverser_changes() {
+    local domain=com.pilotmoon.scroll-reverser
+    local key type value current expected
+    while read -r key type value; do
+        case "$key" in ''|\#*) continue;; esac
+        expected=$value
+        if [ "$type" = "-bool" ]; then
+            [ "$value" = "true" ] && expected=1 || expected=0
+        fi
+        current=`defaults read $domain $key 2> /dev/null`
+        if [ "$current" != "$expected" ]; then
+            echo "$key $type $value"
+        fi
+    done < "${ENV_ROOT}/seeds/scroll-reverser/defaults"
+}
+
+function patch_scroll_reverser() {
+    local domain=com.pilotmoon.scroll-reverser
+
+    # Preferences live in the macOS defaults database, not a dotfile
+    if [ "`uname`" != "Darwin" ]; then
+        return
+    fi
+
+    local changes=`get_scroll_reverser_changes`
+    if [ "$changes" = "" ]; then
+        echo "Scroll Reverser preferences are already up to date, skipping"
+        return
+    fi
+
+    # Backup existing preferences before writing
+    local backup=$HOME/Library/Preferences/$domain.plist.bak-`date +%Y-%m-%d-%H-%M-%S`
+    if defaults export $domain "$backup" 2> /dev/null; then
+        echo "Backing up Scroll Reverser preferences to $backup"
+    fi
+    local key type value
+    echo "$changes" | while read -r key type value; do
+        [ "$key" = "" ] && continue
+        echo "Setting Scroll Reverser $key = $value"
+        defaults write $domain $key $type $value
+    done
+    echo "Restart Scroll Reverser to apply the new preferences"
+}
+
 
 function patch_rc_files() {
     if [ "$1" = "" ]; then
@@ -242,7 +292,80 @@ function patch_rc_files() {
     patch_nvim_rc
     patch_hammerspoon
     patch_karabiner
+    patch_scroll_reverser
 
     echo "Please run below command to update your shell setting:"
     echo -e "\n\tsource $rc\n"
+}
+
+# Print the dotenv block (from ENV_BLOCK_HEAD to the end marker) of stdin
+function extract_env_block() {
+    awk -v head="$ENV_BLOCK_HEAD" 'index($0, head) {p=1} p {print} p && /=(End|END)=/ {exit}'
+}
+
+# Compare <deployed-file> with <expected-file>; with "block", only the dotenv block
+function diff_deployed() {
+    local mode=$1 deployed=$2 expected=$3
+    if [ ! -f "$deployed" ]; then
+        echo "[missing] $deployed"
+        return 1
+    fi
+    if [ "$mode" = "block" ]; then
+        local tmp=`mktemp -d`
+        extract_env_block < "$expected" > $tmp/expected
+        extract_env_block < "$deployed" > $tmp/deployed
+        if [ ! -s $tmp/deployed ]; then
+            echo "[not patched] $deployed"
+            rm -rf $tmp
+            return 1
+        fi
+        expected=$tmp/expected
+        local actual=$tmp/deployed
+    else
+        local actual=$deployed
+    fi
+    local rc=0
+    if cmp -s "$expected" "$actual"; then
+        echo "[same]    $deployed"
+    else
+        echo "[differs] $deployed"
+        diff -u --label "seed" --label "$deployed" "$expected" "$actual"
+        rc=1
+    fi
+    [ "$mode" = "block" ] && rm -rf $tmp
+    return $rc
+}
+
+function diff_rc_files() {
+    if [ "$1" = "" ]; then
+        echo "Usage: diff_rc_files <shell-name>"
+        return 1
+    fi
+    local shell_name=$1
+    local target_root="${TARGET_ROOT:-$HOME}"
+    local tmp=`mktemp -d`
+    local rc=0
+    get_patched_rc $shell_name > $tmp/shellrc
+    get_patched_vimrc > $tmp/vimrc
+
+    diff_deployed block "`get_shell_rc_path $shell_name`" $tmp/shellrc || rc=1
+    diff_deployed block $target_root/.tmux.conf "${ENV_ROOT}/seeds/tmux.conf" || rc=1
+    diff_deployed block $target_root/.vimrc $tmp/vimrc || rc=1
+    diff_deployed block $target_root/.screenrc "${ENV_ROOT}/seeds/screenrc" || rc=1
+    diff_deployed block $target_root/.config/nvim/init.vim "${ENV_ROOT}/seeds/nvimrc" || rc=1
+    diff_deployed file $target_root/.hammerspoon/init.lua "${ENV_ROOT}/seeds/hammerspoon/init.lua" || rc=1
+    diff_deployed file $target_root/.config/karabiner/karabiner.json "${ENV_ROOT}/seeds/karabiner/karabiner.json" || rc=1
+
+    if [ "`uname`" = "Darwin" ]; then
+        local changes=`get_scroll_reverser_changes`
+        if [ "$changes" = "" ]; then
+            echo "[same]    defaults com.pilotmoon.scroll-reverser"
+        else
+            echo "[differs] defaults com.pilotmoon.scroll-reverser (seed values below)"
+            echo "$changes" | sed 's/^/  /'
+            rc=1
+        fi
+    fi
+    rm -rf $tmp
+    return $rc
 }

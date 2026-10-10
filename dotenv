@@ -24,6 +24,7 @@ function print_usage() {
     echo ""
     echo "COMMANDS:"
     echo "  patch        Patch rc files (.bashrc, .vimrc, etc.)"
+    echo "  diff         Compare files deployed by patch with the current seeds"
     echo "  install      Install vim-plug, tmux tpm, fzf"
     echo "  config       Configure git and vim"
     echo "  config-git   Configure git only"
@@ -39,6 +40,10 @@ function print_usage() {
 function patch() {
     echo 'Patching rc ...'
     patch_rc_files $SHELL_NAME
+}
+
+function diff_patched() {
+    diff_rc_files $SHELL_NAME
 }
 
 function install() {
@@ -90,7 +95,7 @@ while [[ $# -gt 0 ]]; do
             print_usage
             exit 0
             ;;
-        patch|install|config|config-git|config-vim|all)
+        patch|diff|install|config|config-git|config-vim|all)
             COMMANDS+=("$1")
             shift
             ;;
@@ -109,10 +114,13 @@ if [ ${#COMMANDS[@]} -eq 0 ]; then
 fi
 
 # Execute commands
+STATUS=0
 for cmd in "${COMMANDS[@]}"; do
     case "$cmd" in
         patch)
             patch;;
+        diff)
+            diff_patched || STATUS=1;;
         install)
             install;;
         config)
@@ -125,3 +133,4 @@ for cmd in "${COMMANDS[@]}"; do
             default_action;;
     esac
 done
+exit $STATUS

@@ -1,0 +1,7 @@
+# Scroll Reverser preferences (domain: com.pilotmoon.scroll-reverser)
+# Format: <key> <defaults-write type flag> <value>
+InvertScrollingOn -bool true
+ReverseTrackpad -bool false
+HideIcon -bool true
+ShowDiscreteScrollOptions -bool true
+SUEnableAutomaticChecks -bool false
