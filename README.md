@@ -21,6 +21,7 @@ git clone https://github.com/rightson/dotenv.git ~/.env
 bash ~/.env/dotenv          # patches rc files + installs tools + configures git/vim
 ```
    - Only patch rc files (no installs): `bash ~/.env/dotenv patch`
+   - Compare what `patch` deployed with the current seeds: `bash ~/.env/dotenv diff` (exits 1 if anything differs)
    - Only install helper tools: `bash ~/.env/dotenv install`
    - Only apply git/vim defaults: `bash ~/.env/dotenv config`
 3) Reload your shell rc
@@ -41,7 +42,7 @@ powershell -File $HOME\.env\dotenv.ps1   # patches your PowerShell profile with 
 - **Windows extras**: PowerShell profile patcher imports git aliases and a prompt from `inc/`.
 
 ## Usage
-- `bash ~/.env/dotenv patch|install|config|config-git|config-vim`
+- `bash ~/.env/dotenv patch|diff|install|config|config-git|config-vim`
   Run targeted steps instead of the full flow.
 - `ENV_ROOT` points to the clone; templates live in `seeds/`, and functions live in `inc/`.
 - Shell rc patching is idempotent; rerunning will skip already-patched files. For shell rc files, a `*.bak-<timestamp>` backup is created before changes.
@@ -98,6 +99,7 @@ Existing configurations are backed up with timestamps before being replaced (e.g
 **Note:** The functions must be sourced because `patch_karabiner` and `patch_hammerspoon` are bash functions defined in [inc/patch.sh](inc/patch.sh), not standalone executables.
 
 ## Customize & extend
+- `dotenv diff` shows a unified diff (`seed` vs. local) for each deployed item: the dotenv block in shell rc, `.tmux.conf`, `.vimrc`, `.screenrc`, and nvim `init.vim`; the whole Hammerspoon and Karabiner files; and the Scroll Reverser keys on macOS. Copy local changes you want to keep back into `seeds/`.
 - Edit the seed files in `seeds/` to change defaults for shells, tmux, Vim/Neovim, Hammerspoon, Karabiner, or Scroll Reverser.
 - Add your own Vim/Neovim plugins in `~/.vimrc.plug` or `~/.config/nvim/extra-plug.vim` (these are created for you).
 - Drop personal scripts into `bin/` and ensure it is on your `PATH` via the seeded rc files.
