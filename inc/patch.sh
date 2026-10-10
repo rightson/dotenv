@@ -224,6 +224,49 @@ function patch_karabiner() {
     fi
 }
 
+function patch_scroll_reverser() {
+    local domain=com.pilotmoon.scroll-reverser
+    local seed_file="${ENV_ROOT}/seeds/scroll-reverser/defaults"
+
+    # Preferences live in the macOS defaults database, not a dotfile
+    if [ "`uname`" != "Darwin" ]; then
+        return
+    fi
+
+    # Collect keys whose current value differs from the seed
+    local changes=""
+    local key type value current expected
+    while read -r key type value; do
+        case "$key" in ''|\#*) continue;; esac
+        expected=$value
+        if [ "$type" = "-bool" ]; then
+            [ "$value" = "true" ] && expected=1 || expected=0
+        fi
+        current=`defaults read $domain $key 2> /dev/null`
+        if [ "$current" != "$expected" ]; then
+            changes="$changes$key $type $value
+"
+        fi
+    done < "$seed_file"
+
+    if [ "$changes" = "" ]; then
+        echo "Scroll Reverser preferences are already up to date, skipping"
+        return
+    fi
+
+    # Backup existing preferences before writing
+    local backup=$HOME/Library/Preferences/$domain.plist.bak-`date +%Y-%m-%d-%H-%M-%S`
+    if defaults export $domain "$backup" 2> /dev/null; then
+        echo "Backing up Scroll Reverser preferences to $backup"
+    fi
+    echo "$changes" | while read -r key type value; do
+        [ "$key" = "" ] && continue
+        echo "Setting Scroll Reverser $key = $value"
+        defaults write $domain $key $type $value
+    done
+    echo "Restart Scroll Reverser to apply the new preferences"
+}
+
 
 function patch_rc_files() {
     if [ "$1" = "" ]; then
@@ -242,6 +285,7 @@ function patch_rc_files() {
     patch_nvim_rc
     patch_hammerspoon
     patch_karabiner
+    patch_scroll_reverser
 
     echo "Please run below command to update your shell setting:"
     echo -e "\n\tsource $rc\n"

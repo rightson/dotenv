@@ -37,7 +37,7 @@ powershell -File $HOME\.env\dotenv.ps1   # patches your PowerShell profile with 
 - **Vim / Neovim**: Sources configs from `vim/` plus local override files (`~/.vimrc.plug`, `~/.config/nvim/extra-plug.vim`) and wires in `vim-plug`.
 - **Git defaults**: Sets `vimdiff` as the difftool, `vim` as core editor, and a long-lived credential cache.
 - **Tools**: Installs `vim-plug`, `tmux-tpm`, and `fzf` automatically. Helpers for `nvm` and macOS text keybindings are available in `inc/install.sh`.
-- **macOS extras**: Seeds for Hammerspoon and Karabiner are copied with timestamped backups (`.bak-YYYY-MM-DD-HH-MM-SS`) if files already exist.
+- **macOS extras**: Seeds for Hammerspoon and Karabiner are copied with timestamped backups (`.bak-YYYY-MM-DD-HH-MM-SS`) if files already exist. Scroll Reverser preferences from `seeds/scroll-reverser/defaults` are written with `defaults write`; the existing plist is exported to `~/Library/Preferences/com.pilotmoon.scroll-reverser.plist.bak-*` first.
 - **Windows extras**: PowerShell profile patcher imports git aliases and a prompt from `inc/`.
 
 ## Usage
@@ -77,7 +77,7 @@ The included Karabiner and Hammerspoon configurations provide powerful keyboard 
 | **Productivity** | **Ctrl + Option + G** | Open Google Translate with clipboard content (EN→ZH-TW) |
 
 ### Manual Setup (macOS)
-To manually install Karabiner and Hammerspoon configurations:
+To manually install Karabiner, Hammerspoon, and Scroll Reverser configurations:
 
 ```bash
 # Source the patch functions first
@@ -88,6 +88,9 @@ patch_karabiner
 
 # Copy Hammerspoon config (backs up existing file automatically)
 patch_hammerspoon
+
+# Apply Scroll Reverser preferences (restart Scroll Reverser afterwards)
+patch_scroll_reverser
 ```
 
 Existing configurations are backed up with timestamps before being replaced (e.g., `init.lua.bak-2025-12-21-10-30-45`).
@@ -95,7 +98,7 @@ Existing configurations are backed up with timestamps before being replaced (e.g
 **Note:** The functions must be sourced because `patch_karabiner` and `patch_hammerspoon` are bash functions defined in [inc/patch.sh](inc/patch.sh), not standalone executables.
 
 ## Customize & extend
-- Edit the seed files in `seeds/` to change defaults for shells, tmux, Vim/Neovim, Hammerspoon, or Karabiner.
+- Edit the seed files in `seeds/` to change defaults for shells, tmux, Vim/Neovim, Hammerspoon, Karabiner, or Scroll Reverser.
 - Add your own Vim/Neovim plugins in `~/.vimrc.plug` or `~/.config/nvim/extra-plug.vim` (these are created for you).
 - Drop personal scripts into `bin/` and ensure it is on your `PATH` via the seeded rc files.
 
