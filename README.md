@@ -126,5 +126,6 @@ Existing configurations are backed up with timestamps before being replaced (e.g
 - Edit the seed files in `seeds/` to change defaults for shells, tmux, Vim/Neovim, Hammerspoon, Karabiner, or Scroll Reverser.
 - Add your own Vim/Neovim plugins in `~/.vimrc.plug` or `~/.config/nvim/extra-plug.vim` (these are created for you).
 - Drop personal scripts into `bin/` and ensure it is on your `PATH` via the seeded rc files.
+- `hostname-forensics.sh [2d]` (macOS): shows when and by which process the LocalHostName/ComputerName changed, plus the Bonjour name-conflict evidence and sleep proxies behind it.
 
 Enjoy :)!
