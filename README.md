@@ -31,6 +31,7 @@ bash ~/.env/dotenv          # patches rc files + installs tools + configures git
 Windows PowerShell:
 ```powershell
 powershell -File $HOME\.env\dotenv.ps1   # patches your PowerShell profile with aliases/prompt
+powershell -File $HOME\.env\dotenv.ps1 update   # pull the latest version, then add new profile lines
 ```
 
 ## What gets installed or patched
@@ -40,7 +41,11 @@ powershell -File $HOME\.env\dotenv.ps1   # patches your PowerShell profile with 
 - **Git defaults**: Sets `vimdiff` as the difftool, `vim` as core editor, and a long-lived credential cache.
 - **Tools**: Installs `vim-plug`, `tmux-tpm`, and `fzf` automatically. Helpers for `nvm` and macOS text keybindings are available in `inc/install.sh`.
 - **macOS extras**: Seeds for Hammerspoon and Karabiner are copied with timestamped backups (`.bak-YYYY-MM-DD-HH-MM-SS`) if files already exist. Scroll Reverser preferences from `seeds/scroll-reverser/defaults` are written with `defaults write`; the existing plist is exported to `~/Library/Preferences/com.pilotmoon.scroll-reverser.plist.bak-*` first.
-- **Claude Code external editor**: `claude` is wrapped so Ctrl+G opens the prompt via `bin/cc-edit` in a new VS Code window (`--profile scratch`); every draft is kept in `~/.claude-prompts/` (pruned after 730 days). Falls back to `$EDITOR` when the `code` CLI is missing. The global `VISUAL`/`EDITOR` stay vim.
+- **Claude Code external editor**: `claude` is wrapped so only Claude Code's Ctrl+G uses `bin/cc-edit` (global `VISUAL`/`EDITOR` stay vim). Every draft is kept in `~/.claude-prompts/` and pruned after 730 days.
+  - macOS/Linux desktop: a new VS Code window with the `scratch` profile; save and close it to return.
+  - code-server, Remote-SSH, WSL: a tab in the editor that owns the terminal; close the tab to return.
+  - No VS Code: `$EDITOR` (or `vi`).
+  - Windows PowerShell: `inc/claude.ps1` + `bin/cc-edit.ps1`, same VS Code behavior (fallback: `$env:EDITOR` or notepad).
 - **Windows extras**: PowerShell profile patcher imports git aliases and a prompt from `inc/`.
 
 ## Usage

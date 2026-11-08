@@ -2,15 +2,17 @@
 # cc-edit: external editor for Claude Code (Ctrl+G).
 #
 # Copies Claude Code's temp prompt file into a persistent drafts folder,
-# opens it in a disposable VS Code window, then copies the result back.
-# Falls back to $EDITOR (or vi) when the `code` CLI is not available,
-# e.g. on a headless Linux box over SSH.
+# opens it in VS Code, then copies the result back. Editor selection:
+#   1. VS Code server terminal (code-server, Remote-SSH, WSL, tunnels):
+#      open a tab in the editor that owns this terminal; close it to return.
+#   2. Desktop VS Code (`code` CLI): disposable new window, scratch profile.
+#   3. Otherwise: $EDITOR (or vi) on the original file, e.g. over plain SSH.
 #
 # Usage: cc-edit <file>
 #
 # Env overrides:
 #   CC_EDIT_DIR      drafts folder        (default: ~/.claude-prompts)
-#   CC_EDIT_PROFILE  VS Code profile name (default: scratch)
+#   CC_EDIT_PROFILE  VS Code profile name (default: scratch; desktop only)
 #   CC_EDIT_KEEP     retention in days    (default: 730, i.e. 2 years)
 
 set -u
@@ -25,8 +27,26 @@ dir="${CC_EDIT_DIR:-$HOME/.claude-prompts}"
 profile="${CC_EDIT_PROFILE:-scratch}"
 keep_days="${CC_EDIT_KEEP:-730}"
 
-# No VS Code CLI: edit the original file in place with a terminal editor.
-if ! command -v code >/dev/null 2>&1; then
+# A VS Code server injects bin/remote-cli into the terminal's PATH and talks
+# to it over $VSCODE_IPC_HOOK_CLI. Require a live socket: with a stale one
+# (e.g. a tmux session that outlived the server) `--wait` would block forever.
+remote_cli=""
+if [ -S "${VSCODE_IPC_HOOK_CLI:-}" ]; then
+    for name in code-server code; do
+        path=$(command -v "$name" 2>/dev/null) || continue
+        case "$path" in
+            */remote-cli/*) remote_cli="$path"; break ;;
+        esac
+    done
+fi
+
+if [ -n "$remote_cli" ]; then
+    # The remote CLI supports --wait but not --profile.
+    open_editor() { "$remote_cli" --wait "$1"; }
+elif command -v code >/dev/null 2>&1; then
+    open_editor() { code --new-window --wait --profile "$profile" "$1"; }
+else
+    # No VS Code: edit the original file in place with a terminal editor.
     exec "${EDITOR:-vi}" "$src"
 fi
 
@@ -34,7 +54,7 @@ mkdir -p "$dir" || exit 1
 dst="$dir/$(date +%Y%m%d-%H%M%S)-$$.md"
 
 cp "$src" "$dst" || exit 1
-code --new-window --wait --profile "$profile" "$dst" || exit $?
+open_editor "$dst" || exit $?
 cp "$dst" "$src" || exit 1
 
 # Prune drafts not modified for more than $keep_days days.
