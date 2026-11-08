@@ -4,7 +4,8 @@ $profilePath = $PROFILE
 # Define the lines we want to add
 $linesToAdd = @(
     '. $Env:USERPROFILE\.env\inc\git-aliases.ps1',
-    '. $Env:USERPROFILE\.env\inc\prompt.ps1'
+    '. $Env:USERPROFILE\.env\inc\prompt.ps1',
+    '. $Env:USERPROFILE\.env\inc\claude.ps1'
 )
 
 function Add-LineIfNotExists {
@@ -37,9 +38,24 @@ function Patch-Profile {
     Write-Host "Profile patching complete."
 }
 
+function Update-Dotenv {
+    # Pull the latest dotenv, then add any profile lines introduced since the
+    # last patch. Patch-Profile only appends missing lines, so this is safe.
+    # Run the pulled script, not this in-memory copy, so new lines are seen.
+    Write-Host "Updating $PSScriptRoot ..."
+    git -C $PSScriptRoot pull --ff-only
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "git pull failed; profile not patched."
+        exit 1
+    }
+    & $PSCommandPath patch
+    Write-Host "Updated. Open a new PowerShell window to load the changes."
+}
+
 function Print-Usage {
     Write-Host "Usage: .\ManagePowerShellProfile.ps1 [patch]"
     Write-Host "  patch: Patch the PowerShell profile"
+    Write-Host "  update: Pull the latest dotenv, then patch the profile"
     Write-Host "  If no argument is provided, patch will be executed by default."
 }
 
@@ -51,6 +67,9 @@ else {
     switch ($args[0].ToLower()) {
         "patch" {
             Patch-Profile
+        }
+        "update" {
+            Update-Dotenv
         }
         "-h" {
             Print-Usage

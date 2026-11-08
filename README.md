@@ -24,12 +24,14 @@ bash ~/.env/dotenv          # patches rc files + installs tools + configures git
    - Compare what `patch` deployed with the current seeds: `bash ~/.env/dotenv diff` (exits 1 if anything differs)
    - Only install helper tools: `bash ~/.env/dotenv install`
    - Only apply git/vim defaults: `bash ~/.env/dotenv config`
+   - Pull the latest version into an existing install: `bash ~/.env/dotenv update` (then open a new shell)
 3) Reload your shell rc
 `source ~/.bashrc` or `source ~/.zshrc` (tcsh uses `~/.cshrc`).
 
 Windows PowerShell:
 ```powershell
 powershell -File $HOME\.env\dotenv.ps1   # patches your PowerShell profile with aliases/prompt
+powershell -File $HOME\.env\dotenv.ps1 update   # pull the latest version, then add new profile lines
 ```
 
 ## What gets installed or patched
@@ -39,10 +41,15 @@ powershell -File $HOME\.env\dotenv.ps1   # patches your PowerShell profile with 
 - **Git defaults**: Sets `vimdiff` as the difftool, `vim` as core editor, and a long-lived credential cache.
 - **Tools**: Installs `vim-plug`, `tmux-tpm`, and `fzf` automatically. Helpers for `nvm` and macOS text keybindings are available in `inc/install.sh`.
 - **macOS extras**: Seeds for Hammerspoon and Karabiner are copied with timestamped backups (`.bak-YYYY-MM-DD-HH-MM-SS`) if files already exist. Scroll Reverser preferences from `seeds/scroll-reverser/defaults` are written with `defaults write`; the existing plist is exported to `~/Library/Preferences/com.pilotmoon.scroll-reverser.plist.bak-*` first.
+- **Claude Code external editor**: `claude` is wrapped so only Claude Code's Ctrl+G uses `bin/cc-edit` (global `VISUAL`/`EDITOR` stay vim). Every draft is kept in `~/.claude-prompts/` and pruned after 730 days.
+  - macOS/Linux desktop: a new VS Code window with the `scratch` profile; save and close it to return.
+  - code-server, Remote-SSH, WSL: a tab in the editor that owns the terminal; close the tab to return.
+  - No VS Code: `$EDITOR` (or `vi`).
+  - Windows PowerShell: `inc/claude.ps1` + `bin/cc-edit.ps1`, same VS Code behavior (fallback: `$env:EDITOR` or notepad).
 - **Windows extras**: PowerShell profile patcher imports git aliases and a prompt from `inc/`.
 
 ## Usage
-- `bash ~/.env/dotenv patch|diff|install|config|config-git|config-vim`
+- `bash ~/.env/dotenv patch|diff|update|install|config|config-git|config-vim`
   Run targeted steps instead of the full flow.
 - `ENV_ROOT` points to the clone; templates live in `seeds/`, and functions live in `inc/`.
 - Shell rc patching is idempotent; rerunning will skip already-patched files. For shell rc files, a `*.bak-<timestamp>` backup is created before changes.
