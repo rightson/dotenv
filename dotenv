@@ -25,6 +25,7 @@ function print_usage() {
     echo "COMMANDS:"
     echo "  patch        Patch rc files (.bashrc, .vimrc, etc.)"
     echo "  diff         Compare files deployed by patch with the current seeds"
+    echo "  update       Pull the latest dotenv into \$ENV_ROOT (rc files are not re-patched)"
     echo "  install      Install vim-plug, tmux tpm, fzf"
     echo "  config       Configure git and vim"
     echo "  config-git   Configure git only"
@@ -44,6 +45,14 @@ function patch() {
 
 function diff_patched() {
     diff_rc_files $SHELL_NAME
+}
+
+function update() {
+    # The patched rc block sources inc/*.sh and puts bin/ on PATH straight from
+    # $ENV_ROOT, so pulling the repo is enough; a new shell picks up the changes.
+    echo "Updating $ENV_ROOT ..."
+    git -C "$ENV_ROOT" pull --ff-only || return 1
+    echo "Updated. Open a new shell, or run: source $(get_shell_rc_path $SHELL_NAME)"
 }
 
 function install() {
@@ -95,7 +104,7 @@ while [[ $# -gt 0 ]]; do
             print_usage
             exit 0
             ;;
-        patch|diff|install|config|config-git|config-vim|all)
+        patch|diff|update|install|config|config-git|config-vim|all)
             COMMANDS+=("$1")
             shift
             ;;
@@ -121,6 +130,8 @@ for cmd in "${COMMANDS[@]}"; do
             patch;;
         diff)
             diff_patched || STATUS=1;;
+        update)
+            update || STATUS=1;;
         install)
             install;;
         config)

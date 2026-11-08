@@ -1,0 +1,43 @@
+#!/bin/bash
+# cc-edit: external editor for Claude Code (Ctrl+G).
+#
+# Copies Claude Code's temp prompt file into a persistent drafts folder,
+# opens it in a disposable VS Code window, then copies the result back.
+# Falls back to $EDITOR (or vi) when the `code` CLI is not available,
+# e.g. on a headless Linux box over SSH.
+#
+# Usage: cc-edit <file>
+#
+# Env overrides:
+#   CC_EDIT_DIR      drafts folder        (default: ~/.claude-prompts)
+#   CC_EDIT_PROFILE  VS Code profile name (default: scratch)
+#   CC_EDIT_KEEP     retention in days    (default: 730, i.e. 2 years)
+
+set -u
+
+if [ $# -lt 1 ]; then
+    echo "Usage: $(basename "$0") <file>" >&2
+    exit 2
+fi
+
+src="$1"
+dir="${CC_EDIT_DIR:-$HOME/.claude-prompts}"
+profile="${CC_EDIT_PROFILE:-scratch}"
+keep_days="${CC_EDIT_KEEP:-730}"
+
+# No VS Code CLI: edit the original file in place with a terminal editor.
+if ! command -v code >/dev/null 2>&1; then
+    exec "${EDITOR:-vi}" "$src"
+fi
+
+mkdir -p "$dir" || exit 1
+dst="$dir/$(date +%Y%m%d-%H%M%S)-$$.md"
+
+cp "$src" "$dst" || exit 1
+code --new-window --wait --profile "$profile" "$dst" || exit $?
+cp "$dst" "$src" || exit 1
+
+# Prune drafts not modified for more than $keep_days days.
+find "$dir" -name '*.md' -mtime +"$keep_days" -delete 2>/dev/null
+
+exit 0
