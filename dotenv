@@ -30,6 +30,7 @@ function print_usage() {
     echo "  config       Configure git and vim"
     echo "  config-git   Configure git only"
     echo "  config-vim   Configure vim only"
+    echo "  config-cc-edit  Choose the editor for Claude Code's Ctrl+G (bin/cc-edit)"
     echo "  all          Run all commands (default)"
     echo ""
     echo "EXAMPLES:"
@@ -79,6 +80,10 @@ function config() {
     config_vim
 }
 
+function config_cc_edit() {
+    "$ENV_ROOT/bin/cc-edit" --config
+}
+
 function default_action() {
     patch
     install
@@ -104,7 +109,7 @@ while [[ $# -gt 0 ]]; do
             print_usage
             exit 0
             ;;
-        patch|diff|update|install|config|config-git|config-vim|all)
+        patch|diff|update|install|config|config-git|config-vim|config-cc-edit|all)
             COMMANDS+=("$1")
             shift
             ;;
@@ -140,6 +145,8 @@ for cmd in "${COMMANDS[@]}"; do
             config_git;;
         config-vim)
             config_vim;;
+        config-cc-edit)
+            config_cc_edit || STATUS=1;;
         all)
             default_action;;
     esac
