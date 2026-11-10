@@ -66,7 +66,7 @@ Change it with:
 - `powershell -File $HOME\.env\dotenv.ps1 config` or `cc-edit -Config` (interactive), `cc-edit -Config -Editor notepad`
 - `cc-edit --show` / `cc-edit -Show` prints the settings and the editor the current terminal would use.
 
-Settings live in `~/.config/cc-edit/config` (`editor=...`, `remote_editor=...`); `CC_EDIT_EDITOR` and `CC_EDIT_REMOTE_EDITOR` override them. An editor that cannot run (no VS Code CLI, gedit without a display) falls back to `$EDITOR` (or `vi`; on Windows, Notepad). Tests: `bash tests/test_cc_edit.sh`, `pwsh -File tests/test_cc_edit.ps1`.
+Settings live in `~/.config/cc-edit/config` (`editor=...`, `remote_editor=...`); `CC_EDIT_EDITOR` and `CC_EDIT_REMOTE_EDITOR` override them. An editor that cannot run falls back to `$EDITOR` (or `vi`; on Windows, Notepad) with a notice: no VS Code CLI or MacVim, a GUI editor without a display (Linux) or in an SSH session (macOS), or a VS Code server that is no longer reachable from a stale terminal. Tests: `bash tests/test_cc_edit.sh`, `pwsh -File tests/test_cc_edit.ps1`.
 
 ## macOS Keyboard Shortcuts
 The included Karabiner and Hammerspoon configurations provide powerful keyboard shortcuts for window management and productivity.

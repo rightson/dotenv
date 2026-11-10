@@ -21,8 +21,18 @@ $conf = Join-Path $homeDir '.config/cc-edit/config'
 $drafts = Join-Path $homeDir '.claude-prompts'
 New-Item -ItemType Directory -Force -Path $stubs, $homeDir | Out-Null
 
-$systemPath = if ($onWindows) { "$env:SystemRoot\System32;$env:SystemRoot" } else { '/usr/bin:/bin' }
 $sep = [IO.Path]::PathSeparator
+# The child PATH holds the stubs plus only what they need, so a real editor in
+# a system directory (e.g. /usr/bin/code from the VS Code .deb) is never found.
+if ($onWindows) {
+    $systemPath = "$env:SystemRoot\System32;$env:SystemRoot"
+}
+else {
+    $systemPath = Join-Path $testRoot 'sysbin'
+    New-Item -ItemType Directory -Force -Path $systemPath | Out-Null
+    $sleep = (Get-Command sleep -CommandType Application | Select-Object -First 1).Source
+    $null = New-Item -ItemType SymbolicLink -Path (Join-Path $systemPath 'sleep') -Target $sleep
+}
 
 # New-Stub NAME ARGINDEX [DELAY]: an editor that logs "NAME args", waits DELAY
 # seconds, then appends "edited by NAME" to its argument number ARGINDEX.
@@ -49,9 +59,11 @@ function Remove-Stub([string]$Name) {
 # Invoke-CcEdit ENV ARGS [INPUT]: run cc-edit.ps1 in a child process with a
 # clean HOME and PATH; return @{ Code; Output }.
 function Invoke-CcEdit([hashtable]$Env, [string[]]$Arguments, [string]$InputText = '') {
+    # Clear every variable bin/cc-edit.ps1 reads, so the caller's shell cannot leak in.
     $vars = @{
-        HOME = $homeDir; USERPROFILE = $homeDir; PATH = "$stubs$sep$systemPath"
-        EDITOR = $null; CC_EDIT_EDITOR = $null; CC_EDIT_CONFIG = $null; CC_EDIT_DIR = $null
+        HOME = $homeDir; USERPROFILE = $homeDir; PATH = "$stubs$sep$systemPath"; EDITOR = $null
+        CC_EDIT_EDITOR = $null; CC_EDIT_CONFIG = $null; CC_EDIT_DIR = $null
+        CC_EDIT_PROFILE = $null; CC_EDIT_KEEP = $null
     }
     foreach ($k in $Env.Keys) { $vars[$k] = $Env[$k] }
     $saved = @{}
@@ -60,7 +72,11 @@ function Invoke-CcEdit([hashtable]$Env, [string[]]$Arguments, [string]$InputText
         [Environment]::SetEnvironmentVariable($k, $vars[$k])
     }
     try {
-        $out = $InputText | & $psExe -NoProfile -ExecutionPolicy Bypass -File $ccEdit @Arguments 2>&1 | Out-String
+        # Windows PowerShell 5.1 turns redirected native stderr into error
+        # records, which 'Stop' would make terminating; keep them as text.
+        $ErrorActionPreference = 'Continue'
+        $out = $InputText | & $psExe -NoProfile -ExecutionPolicy Bypass -File $ccEdit @Arguments 2>&1 |
+            ForEach-Object { "$_" } | Out-String
         return @{ Code = $LASTEXITCODE; Output = $out }
     }
     finally {
@@ -119,6 +135,12 @@ try {
     Assert-Like 'menu shown' $r.Output '*1) code*'
     Assert-Like 'menu choice saved' (Get-Content -Raw -LiteralPath $conf) '*editor=code*'
 
+    # Interactive -Config: Enter replaces an invalid saved value with code.
+    Set-Content -LiteralPath $conf -Value 'editor=gedit'
+    $r = Invoke-CcEdit @{} @('-Config') "`n"
+    Assert-Like 'invalid saved value noted' $r.Output "*saved editor 'gedit' is not valid here*"
+    Assert-Like 'Enter picks code' (Get-Content -Raw -LiteralPath $conf) '*editor=code*'
+
     # The env var overrides the config file; -Show reports it.
     Assert-Like 'CC_EDIT_EDITOR override' (Edit-Prompt @{ CC_EDIT_EDITOR = 'notepad' }) 'notepad *'
     $r = Invoke-CcEdit @{ CC_EDIT_EDITOR = 'notepad' } @('-Show')
@@ -133,6 +155,8 @@ try {
     Remove-Stub code
     Assert-Like 'fallback to EDITOR' (Edit-Prompt @{ EDITOR = 'editor' }) 'editor *'
     Assert-Like 'fallback warning' $script:last.Output '*code is not available here*'
+    $r = Invoke-CcEdit @{ EDITOR = 'editor' } @('-Show')
+    Assert-Like '-Show fallback' $r.Output '*this terminal uses: editor (fallback: code is not available here)*'
 
     # A failing editor: exit code propagates, prompt untouched.
     New-Stub code 5 0 3
@@ -142,13 +166,20 @@ try {
     Assert-Like 'prompt untouched' (Get-Content -LiteralPath $prompt) 'keep'
     New-Stub code 5
 
-    # Drafts older than the retention period are pruned.
+    # Drafts older than the retention period are pruned; a value that is not
+    # a number prunes nothing, and 0 keeps today's drafts.
     $old = Join-Path $drafts 'old.md'
     Set-Content -LiteralPath $old -Value 'old'
     (Get-Item -LiteralPath $old).LastWriteTime = (Get-Date).AddDays(-800)
+    $null = Edit-Prompt @{ CC_EDIT_KEEP = 'forever' }
+    if (-not (Test-Path -LiteralPath $old)) { throw 'FAIL: CC_EDIT_KEEP=forever pruned a draft' }
+    Assert-Like 'bad CC_EDIT_KEEP warning' $script:last.Output "*CC_EDIT_KEEP='forever' is not a number*"
     $null = Edit-Prompt
     if (Test-Path -LiteralPath $old) { throw 'FAIL: old draft not pruned' }
     Write-Host 'ok   old drafts pruned'
+    $null = Edit-Prompt @{ CC_EDIT_KEEP = '0' }
+    if (-not (Get-ChildItem -LiteralPath $drafts -Filter '*.md')) { throw "FAIL: CC_EDIT_KEEP=0 pruned today's drafts" }
+    Write-Host "ok   CC_EDIT_KEEP=0 keeps today's drafts"
 
     # No arguments: usage, exit 2.
     Assert-Like 'usage' (Invoke-CcEdit @{} @()).Code '2'
@@ -156,11 +187,13 @@ try {
     # inc/claude.ps1: VISUAL is set for claude only and restored; cc-edit forwards.
     $fake = Join-Path $testRoot 'fake'
     New-Item -ItemType Directory -Force -Path $fake | Out-Null
+    # The fake claude prints each argument in brackets, so 'a b' must arrive as one.
     if ($onWindows) {
-        Set-Content -LiteralPath (Join-Path $fake 'claude.cmd') -Encoding ASCII -Value '@echo child VISUAL=%VISUAL% args=%*'
+        Set-Content -LiteralPath (Join-Path $fake 'claude.cmd') -Encoding ASCII -Value '@echo child VISUAL=%VISUAL% args=[%~1][%~2]'
     }
     else {
-        Set-Content -LiteralPath (Join-Path $fake 'claude') -Value @('#!/bin/sh', 'echo "child VISUAL=$VISUAL args=$*"')
+        Set-Content -LiteralPath (Join-Path $fake 'claude') -Value @(
+            '#!/bin/sh', 'printf "child VISUAL=%s args=" "$VISUAL"', 'printf "[%s]" "$@"', 'echo')
         chmod +x (Join-Path $fake 'claude')
     }
     $savedPath = $env:PATH
@@ -170,7 +203,7 @@ try {
         $env:VISUAL = 'vim'
         . (Join-Path $repoRoot 'inc/claude.ps1')
         $out = (claude --foo 'a b') -join "`n"
-        Assert-Like 'claude sets VISUAL' $out '*child VISUAL=powershell.exe -NoProfile -ExecutionPolicy Bypass -File *cc-edit.ps1 args=--foo a b*'
+        Assert-Like 'claude sets VISUAL' $out '*child VISUAL=powershell.exe -NoProfile -ExecutionPolicy Bypass -File *cc-edit.ps1 args=`[--foo`]`[a b`]*'
         Assert-Like 'VISUAL restored' $env:VISUAL 'vim'
         Remove-Item Env:VISUAL
         $null = claude

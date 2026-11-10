@@ -22,7 +22,8 @@
 #   CC_EDIT_CONFIG   config file    (default: ~\.config\cc-edit\config)
 #   CC_EDIT_DIR      drafts folder  (default: ~\.claude-prompts)
 #   CC_EDIT_PROFILE  VS Code profile for editor=code (default: scratch)
-#   CC_EDIT_KEEP     draft retention in days (default: 730, i.e. 2 years)
+#   CC_EDIT_KEEP     draft retention in days (default: 730, i.e. 2 years;
+#                    not a number: no pruning)
 #
 # An editor that is not available falls back to $env:EDITOR, then notepad.
 #
@@ -38,7 +39,10 @@ param(
 $ConfPath = if ($env:CC_EDIT_CONFIG) { $env:CC_EDIT_CONFIG } else { Join-Path $HOME '.config\cc-edit\config' }
 $DraftDir = if ($env:CC_EDIT_DIR) { $env:CC_EDIT_DIR } else { Join-Path $HOME '.claude-prompts' }
 $ProfileName = if ($env:CC_EDIT_PROFILE) { $env:CC_EDIT_PROFILE } else { 'scratch' }
-$KeepDays = if ($env:CC_EDIT_KEEP) { [int]$env:CC_EDIT_KEEP } else { 730 }
+$KeepDays = 730
+if ($env:CC_EDIT_KEEP -and -not [int]::TryParse($env:CC_EDIT_KEEP, [ref]$KeepDays)) {
+    $KeepDays = -1   # not a number: do not prune (see Invoke-Edit)
+}
 
 $Editors = @('code', 'notepad')
 $Descriptions = @{
@@ -97,19 +101,22 @@ function Test-Editor([string]$Name) {
     return [bool](Find-Program $Name)
 }
 
-# Editor to use: one of $Editors, or "fallback" for $env:EDITOR.
+# Editor to use: one of $Editors, or "fallback" for $env:EDITOR. When the
+# setting cannot be used, $script:FallbackReason says why.
 function Resolve-Editor {
+    $script:FallbackReason = $null
     $want = Get-EditorSetting
     if ($Editors -notcontains $want) {
         Write-Note "unknown editor '$want' (choose from: $($Editors -join ' ')); using code"
         $want = 'code'
     }
     if (Test-Editor $want) { return $want }
+    $script:FallbackReason = "$want is not available here"
     if ($env:EDITOR) {
-        Write-Note "$want is not available here; using $env:EDITOR"
+        Write-Note "$script:FallbackReason; using $env:EDITOR"
         return 'fallback'
     }
-    Write-Note "$want is not available here; using notepad"
+    Write-Note "$script:FallbackReason; using notepad"
     return 'notepad'
 }
 
@@ -150,16 +157,27 @@ function Show-Settings {
     Write-Output "config file: $ConfPath"
     $line = "editor=$(Get-EditorSetting)  (options: $($Editors -join ' '))"
     if ($env:CC_EDIT_EDITOR) { $line += '  [from CC_EDIT_EDITOR]' }
+    if ($Editors -notcontains (Get-EditorSetting)) { $line += '  [invalid; code is used]' }
     Write-Output $line
-    Write-Output "this terminal uses: $(Resolve-Editor)"
+    $name = Resolve-Editor
+    if ($name -eq 'fallback') { $name = $env:EDITOR }
+    if ($script:FallbackReason) { $name += " (fallback: $script:FallbackReason)" }
+    Write-Output "this terminal uses: $name"
 }
 
 # Choose and save the editor; return the exit code. Prints to the host only,
 # so the return value is the only pipeline output.
 function Invoke-Configure([string]$Choice) {
     if (-not $Choice) {
-        $current = Get-EditorSetting
+        # Enter keeps the saved value, or picks code when none (or an invalid
+        # one) is saved.
         Write-Host 'Claude Code Ctrl+G editor (Windows):'
+        $current = Get-ConfValue 'editor'
+        if ($current -and $Editors -notcontains $current) {
+            Write-Host "  (the saved editor '$current' is not valid here)"
+            $current = $null
+        }
+        if (-not $current) { $current = 'code' }
         for ($i = 0; $i -lt $Editors.Count; $i++) {
             $name = $Editors[$i]
             $mark = ''
@@ -198,8 +216,13 @@ function Invoke-Edit([string]$File) {
     if ($rc -ne 0) { return $rc }
     Copy-Item -LiteralPath $dst -Destination $File
 
-    # Prune drafts not modified for more than $KeepDays days.
-    $cutoff = (Get-Date).AddDays(-$KeepDays)
+    # Prune drafts not modified for more than $KeepDays days, counted in whole
+    # days like `find -mtime +N` in bin/cc-edit (so 0 keeps today's drafts).
+    if ($KeepDays -lt 0) {
+        Write-Note "CC_EDIT_KEEP='$env:CC_EDIT_KEEP' is not a number of days; not pruning drafts"
+        return 0
+    }
+    $cutoff = (Get-Date).AddDays(-($KeepDays + 1))
     Get-ChildItem -LiteralPath $DraftDir -Filter '*.md' -File |
         Where-Object { $_.LastWriteTime -lt $cutoff } |
         Remove-Item -Force -ErrorAction SilentlyContinue

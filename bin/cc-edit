@@ -24,10 +24,13 @@
 #   CC_EDIT_CONFIG   config file    (default: ~/.config/cc-edit/config)
 #   CC_EDIT_DIR      drafts folder  (default: ~/.claude-prompts)
 #   CC_EDIT_PROFILE  VS Code profile for editor=code (default: scratch)
-#   CC_EDIT_KEEP     draft retention in days (default: 730, i.e. 2 years)
+#   CC_EDIT_KEEP     draft retention in days (default: 730, i.e. 2 years;
+#                    not a number: no pruning)
 #
-# An editor that cannot run here (e.g. gedit without a display, or code
-# without the VS Code CLI) falls back to $EDITOR (or vi) in the terminal.
+# An editor that cannot run here falls back to $EDITOR (or vi) in the
+# terminal, with a notice: no VS Code CLI, no MacVim, a GUI editor without a
+# display (Linux) or in an SSH session (macOS), or an unreachable VS Code
+# server.
 #
 # Keep this script compatible with bash 3.2 (macOS /bin/bash).
 
@@ -106,22 +109,51 @@ options() {
 
 # --- editors ----------------------------------------------------------------
 
-# A VS Code server (code-server, Remote-SSH, WSL) injects bin/remote-cli into
-# its terminals' PATH and listens on $VSCODE_IPC_HOOK_CLI. Require a live
-# socket: with a stale one (e.g. tmux outliving the server) --wait never ends.
+# is_remote_cli PATH: succeed if PATH is a VS Code server CLI. A VS Code server
+# (code-server, Remote-SSH, WSL) puts its bin/remote-cli first on its
+# terminals' PATH; desktop VS Code terminals may set $VSCODE_IPC_HOOK_CLI too,
+# so the CLI's path is what tells them apart.
+is_remote_cli() {
+    case "$1" in */remote-cli/*) return 0 ;; esac
+    return 1
+}
+
+# find_remote_cli: print the server CLI of this terminal's VS Code server.
 find_remote_cli() {
     local name path
     [ -S "${VSCODE_IPC_HOOK_CLI:-}" ] || return 1
     for name in code-server code; do
         path=$(command -v "$name" 2>/dev/null) || continue
-        case "$path" in
-            */remote-cli/*) echo "$path"; return 0 ;;
-        esac
+        if is_remote_cli "$path"; then
+            echo "$path"
+            return 0
+        fi
     done
     return 1
 }
 
-# The DMG install does not put mvim on PATH; Homebrew links it into its bin.
+# find_code: print the desktop VS Code CLI. A drag-and-drop install on macOS
+# (e.g. install_vscode in inc/install.sh) does not put `code` on PATH. A
+# server CLI cannot open a local window, so it does not count.
+find_code() {
+    local path app="Visual Studio Code.app/Contents/Resources/app/bin/code"
+    path=$(command -v code 2>/dev/null)
+    if [ -n "$path" ] && ! is_remote_cli "$path"; then
+        echo "$path"
+        return 0
+    fi
+    [ "$os" = Darwin ] || return 1
+    for path in "/Applications/$app" "$HOME/Applications/$app"; do
+        if [ -x "$path" ]; then
+            echo "$path"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# find_mvim: print the MacVim CLI. The DMG install does not put mvim on PATH;
+# Homebrew links it into its bin.
 find_mvim() {
     local path
     for path in "$(command -v mvim 2>/dev/null)" \
@@ -136,32 +168,50 @@ find_mvim() {
     return 1
 }
 
+# has_gui: succeed if a window opened from here reaches the user: on macOS,
+# not an SSH session; elsewhere, an X11 or Wayland display.
+has_gui() {
+    case "$os" in
+        Darwin) [ -z "${SSH_CONNECTION:-}${SSH_TTY:-}" ] ;;
+        *)      [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] ;;
+    esac
+}
+
 # available NAME: succeed if editor NAME can run in this terminal.
 available() {
     case "$1" in
         remote)   find_remote_cli >/dev/null ;;
-        code)     command -v code >/dev/null 2>&1 ;;
-        textedit) [ "$os" = Darwin ] && command -v open >/dev/null 2>&1 ;;
-        macvim)   find_mvim >/dev/null ;;
-        gedit)    command -v gedit >/dev/null 2>&1 &&
-                      [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] ;;
+        # Under WSL, code opens VS Code on Windows, which needs no display.
+        code)     { has_gui || [ -n "${WSL_DISTRO_NAME:-}" ]; } && find_code >/dev/null ;;
+        textedit) [ "$os" = Darwin ] && has_gui ;;
+        macvim)   has_gui && find_mvim >/dev/null ;;
+        gedit)    has_gui && command -v gedit >/dev/null 2>&1 ;;
         vim)      command -v vim >/dev/null 2>&1 ;;
         *)        return 1 ;;
     esac
 }
 
-# pick_editor: print the editor to use in this terminal: one of the editor
-# names, "remote" (a tab in the owning VS Code server) or "terminal".
+# fall_back REASON: use $EDITOR (or vi) in the terminal instead.
+fall_back() {
+    choice=terminal
+    reason="$1"
+    warn "$reason; using ${EDITOR:-vi}"
+}
+
+# pick_editor: set $choice to the editor for this terminal: an editor name,
+# "remote" (a tab in the VS Code server that owns it) or "terminal" ($EDITOR,
+# with the cause in $reason).
 pick_editor() {
     local want
+    choice="" reason=""
     if available remote; then
         want=$(setting remote_editor)
         if ! in_list "$want" "$remote_editors"; then
-            warn "unknown remote_editor '$want'; using code"
+            warn "unknown remote_editor '$want' (choose from: $remote_editors); using code"
             want=code
         fi
         if [ "$want" = code ]; then
-            echo remote
+            choice=remote
             return
         fi
     else
@@ -172,10 +222,9 @@ pick_editor() {
         fi
     fi
     if available "$want"; then
-        echo "$want"
+        choice="$want"
     else
-        warn "$want is not available here; using ${EDITOR:-vi}"
-        echo terminal
+        fall_back "$want is not available here"
     fi
 }
 
@@ -184,11 +233,17 @@ run_editor() {
     case "$1" in
         remote)
             warn "opened in a VS Code tab; close the tab to return"
-            "$(find_remote_cli)" --wait "$2"
+            # The server CLI exits non-zero only when it cannot reach the
+            # server, e.g. a stale $VSCODE_IPC_HOOK_CLI after a window reload
+            # or in a tmux session that outlived it. The draft is untouched.
+            if ! "$(find_remote_cli)" --wait "$2"; then
+                fall_back "the VS Code server of this terminal is not reachable"
+                run_editor terminal "$2"
+            fi
             ;;
         code)
             warn "opened in VS Code; save, then close the tab to return"
-            code --new-window --wait --profile "$profile" "$2"
+            "$(find_code)" --new-window --wait --profile "$profile" "$2"
             ;;
         textedit)
             # -W waits until this new (-n) TextEdit instance quits, so closing
@@ -221,7 +276,14 @@ run_editor() {
             vim "$2"
             ;;
         terminal)
-            "${EDITOR:-vi}" "$2"
+            # A full-screen editor hides the warning at once, so vim and nvim
+            # repeat it on their message line once they have started.
+            case "$(basename "${EDITOR:-vi}")" in
+                vim|nvim)
+                    "${EDITOR:-vi}" -c "autocmd VimEnter * echomsg 'cc-edit: $reason'" "$2" ;;
+                *)
+                    "${EDITOR:-vi}" "$2" ;;
+            esac
             ;;
     esac
 }
@@ -241,11 +303,17 @@ describe() {
     esac
 }
 
-# choose KEY TITLE: interactive menu; print the chosen value.
+# choose KEY TITLE: interactive menu; print the chosen value. Enter keeps the
+# saved value, or picks code when none (or an invalid one) is saved.
 choose() {
     local key="$1" current n i opt mark answer
-    current=$(setting "$key")
+    current=$(conf_get "$key")
     echo "$2" >&2
+    if [ -n "$current" ] && ! in_list "$current" "$(options "$key")"; then
+        echo "  (the saved $key '$current' is not valid here)" >&2
+        current=""
+    fi
+    current="${current:-code}"
     n=0
     for opt in $(options "$key"); do
         n=$((n + 1))
@@ -275,21 +343,25 @@ choose() {
 }
 
 show() {
-    local key var
+    local key var value
     echo "config file: $conf"
     for key in editor remote_editor; do
         var=$(env_name "$key")
-        printf '%s=%s  (options: %s)' "$key" "$(setting "$key")" "$(options "$key")"
+        value=$(setting "$key")
+        printf '%s=%s  (options: %s)' "$key" "$value" "$(options "$key")"
         eval "[ -n \"\${$var:-}\" ]" && printf '  [from %s]' "$var"
+        in_list "$value" "$(options "$key")" || printf '  [invalid; code is used]'
         echo
     done
-    case "$(pick_editor)" in
+    pick_editor 2>/dev/null
+    case "$choice" in
         remote)   echo "this terminal uses: a tab in the VS Code server that owns it" ;;
-        terminal) echo "this terminal uses: ${EDITOR:-vi} (fallback)" ;;
-        *)        echo "this terminal uses: $(pick_editor 2>/dev/null)" ;;
+        terminal) echo "this terminal uses: ${EDITOR:-vi} (fallback: $reason)" ;;
+        *)        echo "this terminal uses: $choice" ;;
     esac
 }
 
+# configure [KEY=VALUE...]: validate every setting, then save them all.
 configure() {
     local arg key value var
     if [ $# -eq 0 ]; then
@@ -307,14 +379,17 @@ configure() {
         key="${arg%%=*}"
         value="${arg#*=}"
         if [ "$key" = "$arg" ] || ! in_list "$key" "editor remote_editor"; then
-            warn "expected editor=NAME or remote_editor=NAME, got '$arg'"
+            warn "expected editor=NAME or remote_editor=NAME, got '$arg'; nothing saved"
             return 2
         fi
         if ! in_list "$value" "$(options "$key")"; then
-            warn "invalid $key '$value' (choose from: $(options "$key"))"
+            warn "invalid $key '$value' (choose from: $(options "$key")); nothing saved"
             return 2
         fi
-        conf_set "$key" "$value" || return 1
+    done
+    for arg in "$@"; do
+        key="${arg%%=*}"
+        conf_set "$key" "${arg#*=}" || return 1
         var=$(env_name "$key")
         eval "[ -n \"\${$var:-}\" ]" && warn "note: $var is set and overrides $key in $conf"
     done
@@ -323,18 +398,24 @@ configure() {
 }
 
 edit() {
-    local src="$1" editor dst
-    editor=$(pick_editor)
+    local src="$1" dst prune=1
+    case "$keep_days" in
+        ''|*[!0-9]*)
+            warn "CC_EDIT_KEEP='$keep_days' is not a number of days; not pruning drafts"
+            prune=""
+            ;;
+    esac
+    pick_editor
 
     mkdir -p "$dir" || return 1
     dst="$dir/$(date +%Y%m%d-%H%M%S)-$$.md"
 
     cp "$src" "$dst" || return 1
-    run_editor "$editor" "$dst" || return $?
+    run_editor "$choice" "$dst" || return $?
     cp "$dst" "$src" || return 1
 
     # Prune drafts not modified for more than $keep_days days.
-    find "$dir" -name '*.md' -mtime +"$keep_days" -delete 2>/dev/null
+    [ -z "$prune" ] || find "$dir" -name '*.md' -mtime +"$keep_days" -delete 2>/dev/null
     return 0
 }
 
