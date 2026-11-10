@@ -32,6 +32,7 @@ Windows PowerShell:
 ```powershell
 powershell -File $HOME\.env\dotenv.ps1   # patches your PowerShell profile with aliases/prompt
 powershell -File $HOME\.env\dotenv.ps1 update   # pull the latest version, then add new profile lines
+powershell -File $HOME\.env\dotenv.ps1 config   # choose the editor for Claude Code's Ctrl+G
 ```
 
 ## What gets installed or patched
@@ -41,18 +42,31 @@ powershell -File $HOME\.env\dotenv.ps1 update   # pull the latest version, then 
 - **Git defaults**: Sets `vimdiff` as the difftool, `vim` as core editor, and a long-lived credential cache.
 - **Tools**: Installs `vim-plug`, `tmux-tpm`, and `fzf` automatically. Helpers for `nvm` and macOS text keybindings are available in `inc/install.sh`.
 - **macOS extras**: Seeds for Hammerspoon and Karabiner are copied with timestamped backups (`.bak-YYYY-MM-DD-HH-MM-SS`) if files already exist. Scroll Reverser preferences from `seeds/scroll-reverser/defaults` are written with `defaults write`; the existing plist is exported to `~/Library/Preferences/com.pilotmoon.scroll-reverser.plist.bak-*` first.
-- **Claude Code external editor**: `claude` is wrapped so only Claude Code's Ctrl+G uses `bin/cc-edit` (global `VISUAL`/`EDITOR` stay vim). Every draft is kept in `~/.claude-prompts/` and pruned after 730 days.
-  - macOS/Linux desktop: a new VS Code window with the `scratch` profile; save and close it to return.
-  - code-server, Remote-SSH, WSL: a tab in the editor that owns the terminal; close the tab to return.
-  - No VS Code: `$EDITOR` (or `vi`).
-  - Windows PowerShell: `inc/claude.ps1` + `bin/cc-edit.ps1`, same VS Code behavior (fallback: `$env:EDITOR` or notepad).
+- **Claude Code external editor**: `claude` is wrapped so only Claude Code's Ctrl+G uses `bin/cc-edit` (global `VISUAL`/`EDITOR` stay vim). Every draft is kept in `~/.claude-prompts/` and pruned after 730 days. See [Claude Code Ctrl+G editor](#claude-code-ctrlg-editor).
 - **Windows extras**: PowerShell profile patcher imports git aliases and a prompt from `inc/`.
 
 ## Usage
-- `bash ~/.env/dotenv patch|diff|update|install|config|config-git|config-vim`
+- `bash ~/.env/dotenv patch|diff|update|install|config|config-git|config-vim|config-cc-edit`
   Run targeted steps instead of the full flow.
 - `ENV_ROOT` points to the clone; templates live in `seeds/`, and functions live in `inc/`.
 - Shell rc patching is idempotent; rerunning will skip already-patched files. For shell rc files, a `*.bak-<timestamp>` backup is created before changes.
+
+## Claude Code Ctrl+G editor
+`bin/cc-edit` (Windows: `bin\cc-edit.ps1`) is Claude Code's external editor. It copies the prompt into `~/.claude-prompts/`, opens the copy, waits until you are done, and copies it back. The editor is configurable; the default is `code` everywhere.
+
+| Where | `editor` / `remote_editor` | How to return to Claude Code |
+| --- | --- | --- |
+| macOS | `code` (default), `textedit`, `macvim`, `vim` | VS Code: save, close the tab. TextEdit: save, quit with Cmd+Q. MacVim: `:wq`. |
+| Linux | `code` (default), `gedit`, `vim` | Save, close the tab or window. gedit needs a display. |
+| Windows | `code` (default), `notepad` | Save, close it. If Notepad returns early (Windows 11 tabs), press Enter in the terminal. |
+| code-server, Remote-SSH, WSL terminal | `remote_editor`: `code` (default, a tab in that editor), `vim` | Close the tab. |
+
+Change it with:
+- `bash ~/.env/dotenv config-cc-edit` or `cc-edit --config` (interactive), `cc-edit --config editor=textedit remote_editor=vim`
+- `powershell -File $HOME\.env\dotenv.ps1 config` or `cc-edit -Config` (interactive), `cc-edit -Config -Editor notepad`
+- `cc-edit --show` / `cc-edit -Show` prints the settings and the editor the current terminal would use.
+
+Settings live in `~/.config/cc-edit/config` (`editor=...`, `remote_editor=...`); `CC_EDIT_EDITOR` and `CC_EDIT_REMOTE_EDITOR` override them. An editor that cannot run falls back to `$EDITOR` (or `vi`; on Windows, Notepad) with a notice: no VS Code CLI or MacVim, a GUI editor without a display (Linux) or in an SSH session (macOS), or a VS Code server that is no longer reachable from a stale terminal. Tests: `bash tests/test_cc_edit.sh`, `pwsh -File tests/test_cc_edit.ps1`.
 
 ## macOS Keyboard Shortcuts
 The included Karabiner and Hammerspoon configurations provide powerful keyboard shortcuts for window management and productivity.

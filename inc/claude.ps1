@@ -14,7 +14,8 @@ function claude {
     # $PSScriptRoot is this file's directory (inc), even inside a function.
     $ccEdit = Join-Path (Split-Path $PSScriptRoot -Parent) 'bin\cc-edit.ps1'
     if ($ccEdit.Contains(' ')) {
-        try { $ccEdit = (New-Object -ComObject Scripting.FileSystemObject).GetFile($ccEdit).ShortPath } catch { }
+        try { $ccEdit = (New-Object -ComObject Scripting.FileSystemObject).GetFile($ccEdit).ShortPath }
+        catch { Write-Verbose "no 8.3 short path for ${ccEdit}: $_" }
     }
     if ($ccEdit.Contains(' ')) {
         Write-Warning "cc-edit disabled, path contains spaces: $ccEdit"
@@ -30,4 +31,9 @@ function claude {
     finally {
         $env:VISUAL = $saved
     }
+}
+
+# cc-edit settings from PowerShell: cc-edit -Config, cc-edit -Show.
+function cc-edit {
+    & (Join-Path (Split-Path $PSScriptRoot -Parent) 'bin\cc-edit.ps1') @args
 }
