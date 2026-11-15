@@ -25,7 +25,7 @@ function print_usage() {
     echo "COMMANDS:"
     echo "  patch        Patch rc files (.bashrc, .vimrc, etc.)"
     echo "  diff         Compare files deployed by patch with the current seeds"
-    echo "  update       Pull the latest dotenv into \$ENV_ROOT (rc files are not re-patched)"
+    echo "  update       Pull the latest dotenv into \$ENV_ROOT, then patch"
     echo "  install      Install vim-plug, tmux tpm, fzf"
     echo "  config       Configure git and vim"
     echo "  config-git   Configure git only"
@@ -49,11 +49,17 @@ function diff_patched() {
 }
 
 function update() {
-    # The patched rc block sources inc/*.sh and puts bin/ on PATH straight from
-    # $ENV_ROOT, so pulling the repo is enough; a new shell picks up the changes.
+    # Pull, then patch, so patch steps added since the last patch are applied.
+    # Patching is idempotent. The pulled inc/*.sh are sourced again so patch
+    # runs the new steps, not the functions loaded before the pull. (Not a
+    # re-exec of dotenv: that would detect bash as the user's shell.)
     echo "Updating $ENV_ROOT ..."
     git -C "$ENV_ROOT" pull --ff-only || return 1
-    echo "Updated. Open a new shell, or run: source $(get_shell_rc_path $SHELL_NAME)"
+    local inc
+    for inc in base install config patch; do
+        source "${ENV_ROOT}/inc/$inc.sh"
+    done
+    patch
 }
 
 function install() {

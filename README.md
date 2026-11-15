@@ -24,7 +24,7 @@ bash ~/.env/dotenv          # patches rc files + installs tools + configures git
    - Compare what `patch` deployed with the current seeds: `bash ~/.env/dotenv diff` (exits 1 if anything differs)
    - Only install helper tools: `bash ~/.env/dotenv install`
    - Only apply git/vim defaults: `bash ~/.env/dotenv config`
-   - Pull the latest version into an existing install: `bash ~/.env/dotenv update` (then open a new shell)
+   - Pull the latest version into an existing install: `bash ~/.env/dotenv update` pulls, then runs `patch` (then open a new shell)
 3) Reload your shell rc
 `source ~/.bashrc` or `source ~/.zshrc` (tcsh uses `~/.cshrc`).
 
