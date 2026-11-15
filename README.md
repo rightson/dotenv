@@ -128,6 +128,7 @@ Existing configurations are backed up with timestamps before being replaced (e.g
 - Edit the seed files in `seeds/` to change defaults for shells, tmux, Vim/Neovim, Hammerspoon, Karabiner, or Scroll Reverser.
 - Add your own Vim/Neovim plugins in `~/.vimrc.plug` or `~/.config/nvim/extra-plug.vim` (these are created for you).
 - Drop personal scripts into `bin/` and ensure it is on your `PATH` via the seeded rc files.
+- `wt-relocate PATH...`: moves the git worktrees found at or under each path to `<main-repo>/.claude/worktrees/<name>`, where Claude Code creates worktrees. Their Claude Code sessions move with them, so `claude --resume` and `claude --continue` still find them. It prints the plan; `--apply` moves. Worktrees that are locked or in use are left alone (`--force` moves them too). Tests: `bash tests/test_wt_relocate.sh`.
 - `hostname-forensics.sh [2d]` (macOS): shows when and by which process the LocalHostName/ComputerName changed, plus the Bonjour name-conflict evidence and sleep proxies behind it.
 
 Enjoy :)!

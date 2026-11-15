@@ -1,0 +1,337 @@
+#!/usr/bin/env python3
+"""wt-relocate: move git worktrees to <main-repo>/.claude/worktrees/<name>.
+
+That is where Claude Code creates worktrees. Each PATH is a linked worktree or
+a folder to search for them (e.g. ~/repo.wt or ~/workspace). The Claude Code
+sessions of a moved worktree move with it, so `claude --resume` and
+`claude --continue` still find them in the new location.
+
+Usage: wt-relocate [--apply] [--force] PATH...
+
+Without --apply nothing changes: the plan is printed.
+
+A worktree is left alone, with the reason printed, when
+  - a process (a shell, an editor, a running agent) has its working directory
+    inside it, or it is locked (`git worktree lock`): --force moves it anyway
+  - the destination already exists
+  - its main repository is bare (there is no <main-repo> to move it into)
+
+<name> is the worktree folder name, without a leading "<main-repo-name>.wt-".
+Sessions are looked up in $CLAUDE_CONFIG_DIR/projects (default ~/.claude).
+"""
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+PRUNE = {".git", "node_modules", ".venv", "venv", "__pycache__", ".tox"}
+# Transcript fields that hold a session's working directory.
+PATH_KEYS = ("cwd", "relocatedCwd", "originalCwd", "preEnterOriginalCwd", "worktreePath")
+MAX_PROJECT_NAME = 200  # longer names are hashed by Claude Code; left alone
+
+
+def git(*args, cwd=None):
+    return subprocess.run(("git",) + args, cwd=cwd, capture_output=True, text=True)
+
+
+def git_out(*args, cwd=None):
+    r = git(*args, cwd=cwd)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def is_under(path, parent):
+    return path == parent or path.startswith(parent.rstrip("/") + "/")
+
+
+def find_candidates(root):
+    """Directories under root that may be linked worktrees (their .git is a file)."""
+    found = []
+    if os.path.isfile(os.path.join(root, ".git")):
+        return [root]
+    for dirpath, dirnames, filenames in os.walk(root):
+        if ".git" in filenames:
+            found.append(dirpath)
+            dirnames[:] = []
+        elif ".git" in dirnames:
+            # A main checkout: ask git instead of walking the whole repository.
+            listed = git_out("worktree", "list", "--porcelain", cwd=dirpath) or ""
+            for line in listed.splitlines():
+                path = line[len("worktree "):]
+                if line.startswith("worktree ") and path != dirpath and is_under(path, dirpath):
+                    found.append(path)
+            dirnames[:] = []
+        else:
+            dirnames[:] = [d for d in dirnames if d not in PRUNE]
+    return found
+
+
+def cwd_holders():
+    """{pid: (command, cwd)} of running processes, or None when unknown."""
+    holders = {}
+    if os.path.isdir("/proc/self"):
+        for pid in os.listdir("/proc"):
+            if pid.isdigit():
+                try:
+                    cwd = os.readlink("/proc/%s/cwd" % pid)
+                    with open("/proc/%s/comm" % pid) as f:
+                        holders[pid] = (f.read().strip(), cwd)
+                except OSError:
+                    pass
+        return holders
+    try:
+        out = subprocess.run(["lsof", "-a", "-d", "cwd", "-Fpcn"],
+                             capture_output=True, text=True).stdout
+    except OSError:
+        return None
+    pid = cmd = None
+    for line in out.splitlines():
+        if line.startswith("p"):
+            pid, cmd = line[1:], "?"
+        elif line.startswith("c"):
+            cmd = line[1:]
+        elif line.startswith("n") and pid:
+            holders[pid] = (cmd, line[1:])
+    return holders
+
+
+def plan_move(wt, holders, force, taken):
+    """Return (action, detail): ("move", plan dict), ("ok", None) or ("skip", reason)."""
+    common = git_out("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=wt)
+    gitdir = git_out("rev-parse", "--absolute-git-dir", cwd=wt)
+    top = git_out("rev-parse", "--show-toplevel", cwd=wt)
+    if not common or not gitdir or not top:
+        return "skip", "not a usable worktree (try `git worktree repair`)"
+    if os.path.realpath(top) != os.path.realpath(wt):
+        return "ok", None  # a folder inside some checkout, not a worktree root
+    if os.path.basename(os.path.dirname(gitdir)) != "worktrees":
+        return "ok", None  # a submodule or a separate-git-dir checkout
+    if os.path.basename(common) != ".git":
+        return "skip", "its main repository is bare"
+    main = os.path.dirname(common)
+    home = os.path.join(main, ".claude", "worktrees")
+    if is_under(os.path.realpath(wt), os.path.realpath(home)):
+        return "ok", None
+    name = os.path.basename(wt)
+    prefix = os.path.basename(main) + ".wt-"
+    if name.startswith(prefix) and len(name) > len(prefix):
+        name = name[len(prefix):]
+    dest = os.path.join(home, name)
+    if os.path.lexists(dest) or dest in taken:
+        return "skip", "destination exists: " + dest
+    if not force:
+        if os.path.exists(os.path.join(gitdir, "locked")):
+            return "skip", "locked (`git worktree unlock`, or --force)"
+        real = os.path.realpath(wt)
+        busy = sorted("%s[%s]" % (cmd, pid) for pid, (cmd, cwd) in (holders or {}).items()
+                      if is_under(cwd, real) or is_under(cwd, wt))
+        if busy:
+            return "skip", "in use by " + ", ".join(busy[:5]) + " (leave it, or --force)"
+    taken.add(dest)
+    return "move", {"wt": wt, "dest": dest, "main": main, "common": common}
+
+
+def repoint_submodules(old, new):
+    """After a plain move: submodule .git files and core.worktree use relative paths."""
+    for dirpath, dirnames, filenames in os.walk(new):
+        if dirpath == new or ".git" not in filenames:
+            continue
+        dotgit = os.path.join(dirpath, ".git")
+        with open(dotgit) as f:
+            text = f.read().strip()
+        if not text.startswith("gitdir: "):
+            continue
+        was = os.path.join(old, os.path.relpath(dirpath, new))
+        module = os.path.normpath(os.path.join(was, text[len("gitdir: "):]))
+        with open(dotgit, "w") as f:
+            f.write("gitdir: %s\n" % os.path.relpath(module, dirpath))
+        git("config", "-f", os.path.join(module, "config"),
+            "core.worktree", os.path.relpath(dirpath, module))
+
+
+def move_worktree(p, force):
+    os.makedirs(os.path.dirname(p["dest"]), exist_ok=True)
+    args = ["worktree", "move"] + (["-f", "-f"] if force else []) + [p["wt"], p["dest"]]
+    r = git(*args, cwd=p["main"])
+    if r.returncode != 0:
+        if "submodule" not in r.stderr:
+            return r.stderr.strip() or "git worktree move failed"
+        # git refuses to move a worktree that has submodules: move it by hand.
+        shutil.move(p["wt"], p["dest"])
+        r = git("worktree", "repair", p["dest"], cwd=p["main"])
+        if r.returncode != 0:
+            return "moved, but `git worktree repair` failed: " + r.stderr.strip()
+        repoint_submodules(p["wt"], p["dest"])
+    # Keep the worktrees out of the main checkout's `git status`.
+    if git("check-ignore", "-q", p["dest"], cwd=p["main"]).returncode != 0:
+        info = os.path.join(p["common"], "info")
+        os.makedirs(info, exist_ok=True)
+        with open(os.path.join(info, "exclude"), "a") as f:
+            f.write("/.claude/worktrees/\n")
+    return None
+
+
+def encode(path):
+    """A working directory's folder name under ~/.claude/projects."""
+    return re.sub(r"[^A-Za-z0-9]", "-", path)
+
+
+def session_cwd(project_dir):
+    """The working directory recorded in a project folder's transcripts."""
+    for name in sorted(os.listdir(project_dir)):
+        if not name.endswith(".jsonl"):
+            continue
+        with open(os.path.join(project_dir, name), "rb") as f:
+            for line in f:
+                m = re.search(rb'"cwd":("(?:[^"\\]|\\.)*")', line)
+                if m:
+                    return json.loads(m.group(1))
+    return None
+
+
+def session_moves(projects, pairs):
+    """[(old project dir, new project dir, old cwd, new cwd)] for moved paths.
+
+    pairs: [(old path, new path)]. A session started in a subfolder of the
+    worktree has its own project folder; those follow too.
+    """
+    moves = []
+    if not os.path.isdir(projects):
+        return moves
+    for name in sorted(os.listdir(projects)):
+        src = os.path.join(projects, name)
+        if not os.path.isdir(src):
+            continue
+        for old, new in pairs:
+            enc = encode(old)
+            if name != enc and not name.startswith(enc + "-"):
+                continue
+            cwd = session_cwd(src)
+            if cwd is None and name == enc:
+                cwd = old
+            if cwd is None or not is_under(cwd, old):
+                continue  # another path with a similar name
+            new_cwd = new + cwd[len(old):]
+            moves.append((src, os.path.join(projects, encode(new_cwd)), old, new))
+            break
+    return moves
+
+
+def rewrite_paths(path, old, new):
+    """Point a transcript's working-directory fields at the new location."""
+    old_json = json.dumps(old)[1:-1].encode()
+    new_json = json.dumps(new)[1:-1].encode()
+    pattern = re.compile(rb'("(?:%s)":")%s(?=["/])'
+                         % ("|".join(PATH_KEYS).encode(), re.escape(old_json)))
+    with open(path, "rb") as f:
+        data = f.read()
+    changed = pattern.sub(lambda m: m.group(1) + new_json, data)
+    if changed == data:
+        return
+    st = os.stat(path)
+    tmp = path + ".wt-relocate"
+    with open(tmp, "wb") as f:
+        f.write(changed)
+    os.chmod(tmp, st.st_mode & 0o7777)
+    os.replace(tmp, path)
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))  # keeps the resume list order
+
+
+def move_sessions(src, dst, old, new):
+    """Move one project folder (merging into an existing one), then fix its paths."""
+    left = []
+    if len(os.path.basename(dst)) > MAX_PROJECT_NAME:
+        return ["project folder name too long: " + os.path.basename(dst)]
+    if not os.path.exists(dst):
+        os.rename(src, dst)
+    else:
+        for entry in os.listdir(src):
+            if os.path.lexists(os.path.join(dst, entry)):
+                left.append("kept (exists in the new folder): " + os.path.join(src, entry))
+            else:
+                os.rename(os.path.join(src, entry), os.path.join(dst, entry))
+        if not os.listdir(src):
+            os.rmdir(src)
+    for dirpath, _, filenames in os.walk(dst):
+        for name in filenames:
+            if name.endswith(".jsonl"):
+                rewrite_paths(os.path.join(dirpath, name), old, new)
+    return left
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        prog="wt-relocate", formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=__doc__.split("\n\nUsage:")[0], epilog=__doc__.split("PATH...\n\n", 1)[1])
+    ap.add_argument("paths", nargs="+", metavar="PATH",
+                    help="a linked worktree, or a folder to search for worktrees")
+    ap.add_argument("--apply", action="store_true", help="move (default: print the plan)")
+    ap.add_argument("--force", action="store_true",
+                    help="also move worktrees that are locked or in use")
+    args = ap.parse_args()
+
+    projects = os.path.join(
+        os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), "projects")
+    candidates = []
+    for path in args.paths:
+        root = os.path.abspath(os.path.expanduser(path))
+        if not os.path.isdir(root):
+            sys.exit("wt-relocate: not a directory: " + path)
+        for wt in find_candidates(root):
+            if wt not in candidates:
+                candidates.append(wt)
+
+    holders = None if args.force else cwd_holders()
+    if holders is None and not args.force:
+        print("warning: cannot list running processes (no /proc, no lsof); "
+              "not checking whether worktrees are in use", file=sys.stderr)
+
+    taken, moved, skipped, in_place = set(), 0, 0, 0
+    for wt in candidates:
+        action, detail = plan_move(wt, holders, args.force, taken)
+        if action == "ok":
+            in_place += 1
+            continue
+        if action == "skip":
+            skipped += 1
+            print("skip  %s\n      %s" % (wt, detail))
+            continue
+        p = detail
+        # Claude Code records the resolved path; cover the path as given too.
+        real_dest = os.path.join(os.path.realpath(p["main"]), os.path.relpath(p["dest"], p["main"]))
+        pairs = [(os.path.realpath(wt), real_dest)]
+        if wt != pairs[0][0]:
+            pairs.append((wt, p["dest"]))
+        sessions = session_moves(projects, pairs)
+        count = sum(1 for src, _, _, _ in sessions
+                    for name in os.listdir(src) if name.endswith(".jsonl"))
+        print("move  %s\n   -> %s  (%d Claude Code session%s)"
+              % (wt, p["dest"], count, "" if count == 1 else "s"))
+        if not args.apply:
+            moved += 1
+            continue
+        error = move_worktree(p, args.force)
+        if error:
+            skipped += 1
+            print("      FAILED: " + error)
+            continue
+        moved += 1
+        for src, dst, old, new in sessions:
+            for note in move_sessions(src, dst, old, new):
+                print("      sessions: " + note)
+        parent = os.path.dirname(wt)
+        if os.path.isdir(parent) and not os.listdir(parent):
+            os.rmdir(parent)  # e.g. an emptied ~/repo.wt
+
+    print("%s%d %s, %d skipped, %d already in place"
+          % ("" if args.apply else "Dry run: ", moved,
+             "moved" if args.apply else "to move", skipped, in_place))
+    if not args.apply and moved:
+        print("Run again with --apply to move them.")
+    return 1 if skipped else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
