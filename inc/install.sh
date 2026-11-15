@@ -188,3 +188,47 @@ function install_macos_kb_bind() {
       ;;
   esac
 }
+
+# install_textmate: install TextMate (macOS only) for bin/agent-edit. Goes to
+# /Applications if writable, else ~/Applications; never uses sudo. Never fails
+# the caller: offline just means agent-edit uses $EDITOR until it is installed.
+# TEXTMATE_URL, TEXTMATE_SYSTEM_APPS and TEXTMATE_USER_APPS are overridable for tests.
+function install_textmate() {
+    [ "`uname`" = "Darwin" ] || return 0
+    local url="${TEXTMATE_URL:-https://api.textmate.org/downloads/release}"
+    local system_apps="${TEXTMATE_SYSTEM_APPS:-/Applications}"
+    local user_apps="${TEXTMATE_USER_APPS:-$HOME/Applications}"
+
+    if [ -d "$system_apps/TextMate.app" ] || [ -d "$user_apps/TextMate.app" ]; then
+        echo "TextMate is already installed, skipping"
+        return 0
+    fi
+
+    local tmp dest
+    tmp=`mktemp -d` || return 0
+    echo "Downloading TextMate ..."
+    if ! curl -fsSL --connect-timeout 5 --max-time 300 -o "$tmp/TextMate.tbz" "$url"; then
+        echo "Could not download TextMate (offline?); agent-edit will use \$EDITOR until it is installed"
+        rm -rf "$tmp"
+        return 0
+    fi
+    if ! tar -xjf "$tmp/TextMate.tbz" -C "$tmp" || [ ! -d "$tmp/TextMate.app" ]; then
+        echo "Could not unpack TextMate; agent-edit will use \$EDITOR until it is installed"
+        rm -rf "$tmp"
+        return 0
+    fi
+
+    if [ -w "$system_apps" ]; then
+        dest="$system_apps"
+    else
+        dest="$user_apps"
+        mkdir -p "$dest"
+    fi
+    if mv "$tmp/TextMate.app" "$dest/"; then
+        echo "Installed TextMate to $dest/TextMate.app"
+    else
+        echo "Could not move TextMate to $dest; agent-edit will use \$EDITOR until it is installed"
+    fi
+    rm -rf "$tmp"
+    return 0
+}

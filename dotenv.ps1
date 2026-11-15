@@ -52,17 +52,17 @@ function Update-Dotenv {
     Write-Host "Updated. Open a new PowerShell window to load the changes."
 }
 
-function Invoke-ConfigCcEdit {
-    # Choose the editor for Claude Code's Ctrl+G (saved in ~\.config\cc-edit\config).
-    & (Join-Path $PSScriptRoot 'bin\cc-edit.ps1') -Config
+function Invoke-ConfigVisual {
+    # Choose the editor that coding agents open with Ctrl+G (saved in ~\.config\agent-edit\config).
+    & (Join-Path $PSScriptRoot 'bin\agent-edit.ps1') -Config
     exit $LASTEXITCODE
 }
 
 function Print-Usage {
-    Write-Host "Usage: dotenv.ps1 [patch|update|config]"
+    Write-Host "Usage: dotenv.ps1 [patch|update|config|config-visual]"
     Write-Host "  patch:  Patch the PowerShell profile"
     Write-Host "  update: Pull the latest dotenv, then patch the profile"
-    Write-Host "  config: Choose the editor for Claude Code's Ctrl+G (alias: config-cc-edit)"
+    Write-Host "  config, config-visual: Choose the editor that coding agents (Claude Code, Codex) open with Ctrl+G"
     Write-Host "  If no argument is provided, patch will be executed by default."
 }
 
@@ -79,10 +79,10 @@ else {
             Update-Dotenv
         }
         "config" {
-            Invoke-ConfigCcEdit
+            Invoke-ConfigVisual
         }
-        "config-cc-edit" {
-            Invoke-ConfigCcEdit
+        "config-visual" {
+            Invoke-ConfigVisual
         }
         "-h" {
             Print-Usage

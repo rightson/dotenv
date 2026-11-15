@@ -1,39 +1,43 @@
-# Claude Code helpers for PowerShell (dot-sourced from $PROFILE by dotenv.ps1).
+# Coding-agent helpers for PowerShell (dot-sourced from $PROFILE by dotenv.ps1).
 
-# Claude Code only: open Ctrl+G prompts via bin\cc-edit.ps1; the global VISUAL
-# is left untouched. Claude Code splits $VISUAL on spaces and runs it without
-# a shell, so the editor command must start with an .exe and the script path
-# must not contain spaces (the 8.3 short path is used if it does).
-function claude {
-    $exe = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+# Run coding agent $Name (claude, codex) with Ctrl+G prompts opened via
+# bin\agent-edit.ps1; the global VISUAL is left untouched. The agents split
+# $VISUAL on spaces and run it without a shell, so the editor command must
+# start with an .exe and the script path must not contain spaces (the 8.3
+# short path is used if it does).
+function Invoke-Agent([string]$Name, [object[]]$AgentArgs) {
+    $exe = Get-Command $Name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $exe) {
-        Write-Error 'claude: executable not found on PATH'
+        Write-Error "${Name}: executable not found on PATH"
         return
     }
 
     # $PSScriptRoot is this file's directory (inc), even inside a function.
-    $ccEdit = Join-Path (Split-Path $PSScriptRoot -Parent) 'bin\cc-edit.ps1'
-    if ($ccEdit.Contains(' ')) {
-        try { $ccEdit = (New-Object -ComObject Scripting.FileSystemObject).GetFile($ccEdit).ShortPath }
-        catch { Write-Verbose "no 8.3 short path for ${ccEdit}: $_" }
+    $agentEdit = Join-Path (Split-Path $PSScriptRoot -Parent) 'bin\agent-edit.ps1'
+    if ($agentEdit.Contains(' ')) {
+        try { $agentEdit = (New-Object -ComObject Scripting.FileSystemObject).GetFile($agentEdit).ShortPath }
+        catch { Write-Verbose "no 8.3 short path for ${agentEdit}: $_" }
     }
-    if ($ccEdit.Contains(' ')) {
-        Write-Warning "cc-edit disabled, path contains spaces: $ccEdit"
-        & $exe.Source @args
+    if ($agentEdit.Contains(' ')) {
+        Write-Warning "agent-edit disabled, path contains spaces: $agentEdit"
+        & $exe.Source @AgentArgs
         return
     }
 
     $saved = $env:VISUAL
-    $env:VISUAL = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ccEdit"
+    $env:VISUAL = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File $agentEdit"
     try {
-        & $exe.Source @args
+        & $exe.Source @AgentArgs
     }
     finally {
         $env:VISUAL = $saved
     }
 }
 
-# cc-edit settings from PowerShell: cc-edit -Config, cc-edit -Show.
-function cc-edit {
-    & (Join-Path (Split-Path $PSScriptRoot -Parent) 'bin\cc-edit.ps1') @args
+function claude { Invoke-Agent 'claude' $args }
+function codex { Invoke-Agent 'codex' $args }
+
+# agent-edit settings from PowerShell: agent-edit -Config, agent-edit -Show.
+function agent-edit {
+    & (Join-Path (Split-Path $PSScriptRoot -Parent) 'bin\agent-edit.ps1') @args
 }

@@ -1,34 +1,35 @@
 #!/bin/bash
-# cc-edit: external editor for Claude Code (Ctrl+G).
+# agent-edit: external editor for coding agents (Claude Code, Codex, ...).
 #
-# Claude Code runs $VISUAL on its temp prompt file and reads the file back
-# when the editor exits. cc-edit copies that file into a persistent drafts
+# Ctrl+G in a coding agent runs $VISUAL on its temp prompt file and reads the
+# file back when the editor exits. agent-edit copies that file into a persistent drafts
 # folder, opens the copy in the configured editor, waits until editing is
 # done, then copies the result back.
 #
 # Usage:
-#   cc-edit <file>                  edit <file> (what Claude Code runs)
-#   cc-edit --config                choose the editors interactively
-#   cc-edit --config KEY=VALUE...   set editors, e.g. editor=textedit
-#   cc-edit --show                  print the settings and the editor this
+#   agent-edit <file>                  edit <file> (what the agent runs)
+#   agent-edit --config                choose the editors interactively
+#   agent-edit --config KEY=VALUE...   set editors, e.g. editor=textmate
+#   agent-edit --show                  print the settings and the editor this
 #                                   terminal would use
 #
-# Settings (the env var overrides the config file; the default is code):
-#   editor         CC_EDIT_EDITOR         macOS: code textedit macvim vim
-#                                         Linux: code gedit vim
-#   remote_editor  CC_EDIT_REMOTE_EDITOR  in VS Code server terminals
-#                                         (code-server, Remote-SSH, WSL):
-#                                         code (a tab in the owning editor), vim
+# Settings (the env var overrides the config file; the default depends on the OS):
+#   editor         AGENT_EDIT_EDITOR         macOS: textmate (default) code macvim vim
+#                                            Linux: gedit (default) code vim
+#   remote_editor  AGENT_EDIT_REMOTE_EDITOR  in VS Code server terminals
+#                                            (code-server, Remote-SSH, WSL):
+#                                            code (default, a tab in the owning
+#                                            editor), vim
 #
 # Other env overrides:
-#   CC_EDIT_CONFIG   config file    (default: ~/.config/cc-edit/config)
-#   CC_EDIT_DIR      drafts folder  (default: ~/.claude-prompts)
-#   CC_EDIT_PROFILE  VS Code profile for editor=code (default: scratch)
-#   CC_EDIT_KEEP     draft retention in days (default: 730, i.e. 2 years;
+#   AGENT_EDIT_CONFIG   config file    (default: ~/.config/agent-edit/config)
+#   AGENT_EDIT_DIR      drafts folder  (default: ~/.agent-prompts)
+#   AGENT_EDIT_PROFILE  VS Code profile for editor=code (default: scratch)
+#   AGENT_EDIT_KEEP     draft retention in days (default: 730, i.e. 2 years;
 #                    not a number: no pruning)
 #
 # An editor that cannot run here falls back to $EDITOR (or vi) in the
-# terminal, with a notice: no VS Code CLI, no MacVim, a GUI editor without a
+# terminal, with a notice: no VS Code CLI, no TextMate, no MacVim, a GUI editor without a
 # display (Linux) or in an SSH session (macOS), or an unreachable VS Code
 # server.
 #
@@ -36,19 +37,27 @@
 
 set -u
 
-conf="${CC_EDIT_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/cc-edit/config}"
-dir="${CC_EDIT_DIR:-$HOME/.claude-prompts}"
-profile="${CC_EDIT_PROFILE:-scratch}"
-keep_days="${CC_EDIT_KEEP:-730}"
-os="${CC_EDIT_OS:-$(uname -s)}"     # CC_EDIT_OS is for tests only
+conf="${AGENT_EDIT_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/agent-edit/config}"
+dir="${AGENT_EDIT_DIR:-$HOME/.agent-prompts}"
+profile="${AGENT_EDIT_PROFILE:-scratch}"
+keep_days="${AGENT_EDIT_KEEP:-730}"
+os="${AGENT_EDIT_OS:-$(uname -s)}"     # AGENT_EDIT_OS is for tests only
 
 case "$os" in
-    Darwin) local_editors="code textedit macvim vim" ;;
-    *)      local_editors="code gedit vim" ;;
+    Darwin) local_editors="textmate code macvim vim" ;;
+    *)      local_editors="gedit code vim" ;;
 esac
 remote_editors="code vim"
 
-warn() { echo "cc-edit: $*" >&2; }
+# default_for KEY: print the default value of KEY on this platform.
+default_for() {
+    case "$1" in
+        editor)        echo "${local_editors%% *}" ;;
+        remote_editor) echo code ;;
+    esac
+}
+
+warn() { echo "agent-edit: $*" >&2; }
 
 usage() {
     echo "Usage: $(basename "$0") <file> | --config [KEY=VALUE...] | --show"
@@ -76,7 +85,7 @@ conf_set() {
         if [ -f "$conf" ]; then
             grep -v "^[[:space:]]*$1[[:space:]]*=" "$conf"
         else
-            echo "# cc-edit settings; see $0 or run: cc-edit --config"
+            echo "# agent-edit settings; see $0 or run: agent-edit --config"
         fi
         echo "$1=$2"
     } > "$tmp" && mv "$tmp" "$conf"
@@ -85,18 +94,18 @@ conf_set() {
 # env_name KEY: print the env var that overrides KEY.
 env_name() {
     case "$1" in
-        editor)        echo CC_EDIT_EDITOR ;;
-        remote_editor) echo CC_EDIT_REMOTE_EDITOR ;;
+        editor)        echo AGENT_EDIT_EDITOR ;;
+        remote_editor) echo AGENT_EDIT_REMOTE_EDITOR ;;
     esac
 }
 
-# setting KEY: print the effective value (env var, config file, "code").
+# setting KEY: print the effective value (env var, config file, default_for).
 setting() {
     local var value
     var=$(env_name "$1")
     eval "value=\${$var:-}"
     [ -n "$value" ] || value=$(conf_get "$1")
-    echo "${value:-code}"
+    echo "${value:-$(default_for "$1")}"
 }
 
 # options KEY: print the valid values of KEY on this platform.
@@ -152,6 +161,23 @@ find_code() {
     return 1
 }
 
+# find_mate: print the TextMate CLI. TextMate installs mate only on request;
+# the app bundle always contains one.
+find_mate() {
+    local path app
+    for path in "$(command -v mate 2>/dev/null)" \
+                /Applications/TextMate.app/Contents/MacOS/mate \
+                "$HOME/Applications/TextMate.app/Contents/MacOS/mate" \
+                /Applications/TextMate.app/Contents/Resources/mate \
+                "$HOME/Applications/TextMate.app/Contents/Resources/mate"; do
+        if [ -n "$path" ] && [ -x "$path" ]; then
+            echo "$path"
+            return 0
+        fi
+    done
+    return 1
+}
+
 # find_mvim: print the MacVim CLI. The DMG install does not put mvim on PATH;
 # Homebrew links it into its bin.
 find_mvim() {
@@ -183,7 +209,7 @@ available() {
         remote)   find_remote_cli >/dev/null ;;
         # Under WSL, code opens VS Code on Windows, which needs no display.
         code)     { has_gui || [ -n "${WSL_DISTRO_NAME:-}" ]; } && find_code >/dev/null ;;
-        textedit) [ "$os" = Darwin ] && has_gui ;;
+        textmate) [ "$os" = Darwin ] && has_gui && find_mate >/dev/null ;;
         macvim)   has_gui && find_mvim >/dev/null ;;
         gedit)    has_gui && command -v gedit >/dev/null 2>&1 ;;
         vim)      command -v vim >/dev/null 2>&1 ;;
@@ -207,8 +233,8 @@ pick_editor() {
     if available remote; then
         want=$(setting remote_editor)
         if ! in_list "$want" "$remote_editors"; then
-            warn "unknown remote_editor '$want' (choose from: $remote_editors); using code"
-            want=code
+            warn "unknown remote_editor '$want' (choose from: $remote_editors); using $(default_for remote_editor)"
+            want=$(default_for remote_editor)
         fi
         if [ "$want" = code ]; then
             choice=remote
@@ -217,12 +243,14 @@ pick_editor() {
     else
         want=$(setting editor)
         if ! in_list "$want" "$local_editors"; then
-            warn "unknown editor '$want' (choose from: $local_editors); using code"
-            want=code
+            warn "unknown editor '$want' (choose from: $local_editors); using $(default_for editor)"
+            want=$(default_for editor)
         fi
     fi
     if available "$want"; then
         choice="$want"
+    elif [ "$want" = textmate ]; then
+        fall_back "textmate is not available here (run: dotenv patch to install TextMate)"
     else
         fall_back "$want is not available here"
     fi
@@ -245,21 +273,10 @@ run_editor() {
             warn "opened in VS Code; save, then close the tab to return"
             "$(find_code)" --new-window --wait --profile "$profile" "$2"
             ;;
-        textedit)
-            # -W waits until this new (-n) TextEdit instance quits, so closing
-            # the window is not enough. The --args are NSUserDefaults
-            # overrides for this launch only (best effort, untested): no
-            # smart quotes/dashes/text replacement, which would corrupt the
-            # prompt, and no restore of previously open documents. If quotes
-            # still get curled, turn off TextEdit > Settings > Smart quotes.
-            warn "opened in TextEdit; save (Cmd+S), then quit TextEdit (Cmd+Q) to return"
-            open -W -n -a TextEdit "$2" --args \
-                -SmartQuotes NO -SmartDashes NO -TextReplacement NO \
-                -SubstitutionsEnabledInRichTextOnly YES \
-                -NSAutomaticQuoteSubstitutionEnabled NO \
-                -NSAutomaticDashSubstitutionEnabled NO \
-                -NSAutomaticTextReplacementEnabled NO \
-                -ApplePersistenceIgnoreState YES
+        textmate)
+            # -w waits until the document's window (tab) is closed.
+            warn "opened in TextMate; save, then close the window to return"
+            "$(find_mate)" -w "$2"
             ;;
         macvim)
             # -f keeps mvim in the foreground until the window is closed.
@@ -280,7 +297,7 @@ run_editor() {
             # repeat it on their message line once they have started.
             case "$(basename "${EDITOR:-vi}")" in
                 vim|nvim)
-                    "${EDITOR:-vi}" -c "autocmd VimEnter * echomsg 'cc-edit: $reason'" "$2" ;;
+                    "${EDITOR:-vi}" -c "autocmd VimEnter * echomsg 'agent-edit: $reason'" "$2" ;;
                 *)
                     "${EDITOR:-vi}" "$2" ;;
             esac
@@ -294,7 +311,7 @@ run_editor() {
 describe() {
     case "$1:$2" in
         editor:code)        echo "VS Code, new window with the '$profile' profile" ;;
-        editor:textedit)    echo "TextEdit; quit it (Cmd+Q) to return" ;;
+        editor:textmate)    echo "TextMate" ;;
         editor:macvim)      echo "MacVim" ;;
         editor:gedit)       echo "gedit (needs a display)" ;;
         editor:vim)         echo "vim in the terminal" ;;
@@ -304,7 +321,7 @@ describe() {
 }
 
 # choose KEY TITLE: interactive menu; print the chosen value. Enter keeps the
-# saved value, or picks code when none (or an invalid one) is saved.
+# saved value, or picks the default when none (or an invalid one) is saved.
 choose() {
     local key="$1" current n i opt mark answer
     current=$(conf_get "$key")
@@ -313,7 +330,7 @@ choose() {
         echo "  (the saved $key '$current' is not valid here)" >&2
         current=""
     fi
-    current="${current:-code}"
+    current="${current:-$(default_for "$key")}"
     n=0
     for opt in $(options "$key"); do
         n=$((n + 1))
@@ -350,7 +367,7 @@ show() {
         value=$(setting "$key")
         printf '%s=%s  (options: %s)' "$key" "$value" "$(options "$key")"
         eval "[ -n \"\${$var:-}\" ]" && printf '  [from %s]' "$var"
-        in_list "$value" "$(options "$key")" || printf '  [invalid; code is used]'
+        in_list "$value" "$(options "$key")" || printf '  [invalid; %s is used]' "$(default_for "$key")"
         echo
     done
     pick_editor 2>/dev/null
@@ -369,7 +386,7 @@ configure() {
             warn "--config without KEY=VALUE needs a terminal"
             return 2
         fi
-        value=$(choose editor "Claude Code Ctrl+G editor ($os):") || return 1
+        value=$(choose editor "Ctrl+G editor for coding agents ($os):") || return 1
         set -- "editor=$value"
         value=$(choose remote_editor \
             "Editor inside VS Code server terminals (code-server, Remote-SSH, WSL):") || return 1
@@ -397,16 +414,29 @@ configure() {
     show
 }
 
+# migrate_drafts: with the default drafts folder, move the old default
+# (~/.claude-prompts) to the new one the first time.
+migrate_drafts() {
+    [ -z "${AGENT_EDIT_DIR:-}" ] || return 0
+    [ ! -e "$dir" ] && [ -d "$HOME/.claude-prompts" ] || return 0
+    if mv "$HOME/.claude-prompts" "$dir"; then
+        warn "moved $HOME/.claude-prompts to $dir"
+    else
+        warn "could not move $HOME/.claude-prompts to $dir; using $dir"
+    fi
+}
+
 edit() {
     local src="$1" dst prune=1
     case "$keep_days" in
         ''|*[!0-9]*)
-            warn "CC_EDIT_KEEP='$keep_days' is not a number of days; not pruning drafts"
+            warn "AGENT_EDIT_KEEP='$keep_days' is not a number of days; not pruning drafts"
             prune=""
             ;;
     esac
     pick_editor
 
+    migrate_drafts
     mkdir -p "$dir" || return 1
     dst="$dir/$(date +%Y%m%d-%H%M%S)-$$.md"
 

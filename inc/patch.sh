@@ -274,6 +274,13 @@ function patch_scroll_reverser() {
     echo "Restart Scroll Reverser to apply the new preferences"
 }
 
+# TextMate is agent-edit's default editor on macOS. A custom --target-root
+# must not install apps.
+function patch_visual() {
+    [ "$TARGET_ROOT" = "$HOME" ] || return 0
+    type install_textmate > /dev/null 2>&1 || return 0
+    install_textmate
+}
 
 function patch_rc_files() {
     if [ "$1" = "" ]; then
@@ -293,6 +300,7 @@ function patch_rc_files() {
     patch_hammerspoon
     patch_karabiner
     patch_scroll_reverser
+    patch_visual
 
     echo "Please run below command to update your shell setting:"
     echo -e "\n\tsource $rc\n"
