@@ -55,10 +55,13 @@ function update() {
     # re-exec of dotenv: that would detect bash as the user's shell.)
     echo "Updating $ENV_ROOT ..."
     git -C "$ENV_ROOT" pull --ff-only || return 1
-    local inc
+    # base.sh detects the running shell (bash, since dotenv is a bash script),
+    # so keep the user's shell detected at startup.
+    local inc shell_name=$SHELL_NAME shell_path=$SHELL_PATH
     for inc in base install config patch; do
         source "${ENV_ROOT}/inc/$inc.sh"
     done
+    export SHELL_NAME=$shell_name SHELL_PATH=$shell_path
     patch
 }
 
