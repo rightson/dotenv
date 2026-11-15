@@ -24,7 +24,7 @@ bash ~/.env/dotenv          # patches rc files + installs tools + configures git
    - Compare what `patch` deployed with the current seeds: `bash ~/.env/dotenv diff` (exits 1 if anything differs)
    - Only install helper tools: `bash ~/.env/dotenv install`
    - Only apply git/vim defaults: `bash ~/.env/dotenv config`
-   - Pull the latest version into an existing install: `bash ~/.env/dotenv update` (then open a new shell)
+   - Pull the latest version into an existing install: `bash ~/.env/dotenv update` pulls, then runs `patch` (then open a new shell)
 3) Reload your shell rc
 `source ~/.bashrc` or `source ~/.zshrc` (tcsh uses `~/.cshrc`).
 
@@ -32,6 +32,7 @@ Windows PowerShell:
 ```powershell
 powershell -File $HOME\.env\dotenv.ps1   # patches your PowerShell profile with aliases/prompt
 powershell -File $HOME\.env\dotenv.ps1 update   # pull the latest version, then add new profile lines
+powershell -File $HOME\.env\dotenv.ps1 config   # choose the editor for Claude Code's Ctrl+G
 ```
 
 ## What gets installed or patched
@@ -41,18 +42,33 @@ powershell -File $HOME\.env\dotenv.ps1 update   # pull the latest version, then 
 - **Git defaults**: Sets `vimdiff` as the difftool, `vim` as core editor, and a long-lived credential cache.
 - **Tools**: Installs `vim-plug`, `tmux-tpm`, and `fzf` automatically. Helpers for `nvm` and macOS text keybindings are available in `inc/install.sh`.
 - **macOS extras**: Seeds for Hammerspoon and Karabiner are copied with timestamped backups (`.bak-YYYY-MM-DD-HH-MM-SS`) if files already exist. Scroll Reverser preferences from `seeds/scroll-reverser/defaults` are written with `defaults write`; the existing plist is exported to `~/Library/Preferences/com.pilotmoon.scroll-reverser.plist.bak-*` first.
-- **Claude Code external editor**: `claude` is wrapped so only Claude Code's Ctrl+G uses `bin/cc-edit` (global `VISUAL`/`EDITOR` stay vim). Every draft is kept in `~/.claude-prompts/` and pruned after 730 days.
-  - macOS/Linux desktop: a new VS Code window with the `scratch` profile; save and close it to return.
-  - code-server, Remote-SSH, WSL: a tab in the editor that owns the terminal; close the tab to return.
-  - No VS Code: `$EDITOR` (or `vi`).
-  - Windows PowerShell: `inc/claude.ps1` + `bin/cc-edit.ps1`, same VS Code behavior (fallback: `$env:EDITOR` or notepad).
+- **Coding-agent external editor**: `claude` and `codex` are wrapped so only their Ctrl+G uses `bin/agent-edit` (global `VISUAL`/`EDITOR` stay vim). Every draft is kept in `~/.agent-prompts/` and pruned after 730 days. On macOS, `dotenv patch` installs TextMate, the default editor there. See [Coding-agent Ctrl+G editor](#coding-agent-ctrlg-editor).
 - **Windows extras**: PowerShell profile patcher imports git aliases and a prompt from `inc/`.
 
 ## Usage
-- `bash ~/.env/dotenv patch|diff|update|install|config|config-git|config-vim`
+- `bash ~/.env/dotenv patch|diff|update|install|config|config-git|config-vim|config-visual`
   Run targeted steps instead of the full flow.
 - `ENV_ROOT` points to the clone; templates live in `seeds/`, and functions live in `inc/`.
 - Shell rc patching is idempotent; rerunning will skip already-patched files. For shell rc files, a `*.bak-<timestamp>` backup is created before changes.
+
+## Coding-agent Ctrl+G editor
+`bin/agent-edit` (Windows: `bin\agent-edit.ps1`) is the external editor for coding agents (Claude Code, Codex). The `claude` and `codex` wrappers set `VISUAL` to it for that one command. It copies the prompt into `~/.agent-prompts/`, opens the copy, waits until you are done, and copies it back. The first run moves an existing `~/.claude-prompts/` folder to `~/.agent-prompts/` (not when `AGENT_EDIT_DIR` is set).
+
+| Where | `editor` / `remote_editor` | How to return to the agent |
+| --- | --- | --- |
+| macOS | `textmate` (default), `code`, `macvim`, `vim` | TextMate: save, close the window. VS Code: save, close the tab. MacVim: `:wq`. |
+| Linux | `gedit` (default), `code`, `vim` | Save, close the window or tab. gedit needs a display. |
+| Windows | `notepad` (default), `code` | Save, close it. If Notepad returns early (Windows 11 tabs), press Enter in the terminal. |
+| code-server, Remote-SSH, WSL terminal | `remote_editor`: `code` (default, a tab in that editor), `vim` | Close the tab. |
+
+`dotenv patch` on macOS downloads TextMate to `/Applications` (or `~/Applications` when that is not writable) unless it is already installed. Offline, patch continues and agent-edit uses `$EDITOR` until TextMate is installed. A custom `--target-root` installs nothing.
+
+Change the editor with:
+- `bash ~/.env/dotenv config-visual` or `agent-edit --config` (interactive), `agent-edit --config editor=code remote_editor=vim`
+- `powershell -File $HOME\.env\dotenv.ps1 config-visual` or `agent-edit -Config` (interactive), `agent-edit -Config -Editor code`
+- `agent-edit --show` / `agent-edit -Show` prints the settings and the editor the current terminal would use.
+
+Settings live in `~/.config/agent-edit/config` (`editor=...`, `remote_editor=...`); `AGENT_EDIT_EDITOR` and `AGENT_EDIT_REMOTE_EDITOR` override them. Other overrides: `AGENT_EDIT_CONFIG` (config file), `AGENT_EDIT_DIR` (drafts folder), `AGENT_EDIT_PROFILE` (VS Code profile, default `scratch`), `AGENT_EDIT_KEEP` (retention in days, default 730). An editor that cannot run falls back to `$EDITOR` (or `vi`; on Windows, Notepad) with a notice: no TextMate, VS Code CLI or MacVim, a GUI editor without a display (Linux) or in an SSH session (macOS), or a VS Code server that is no longer reachable from a stale terminal. Tests: `bash tests/test_agent_edit.sh`, `bash tests/test_install_textmate.sh`, `pwsh -File tests/test_agent_edit.ps1`.
 
 ## macOS Keyboard Shortcuts
 The included Karabiner and Hammerspoon configurations provide powerful keyboard shortcuts for window management and productivity.

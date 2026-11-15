@@ -8,8 +8,9 @@ export VIM_BIN=/usr/bin/vim
 export EDITOR=$VIM_BIN
 export SVN_EDITOR=$EDITOR
 export VISUAL=$VIM_BIN
-# Claude Code only: open Ctrl+G prompts via bin/cc-edit; global VISUAL stays vim
-claude() { VISUAL="$ENV_ROOT/bin/cc-edit" command claude "$@"; }
+# Coding agents only: open Ctrl+G prompts via bin/agent-edit; global VISUAL stays vim
+claude() { VISUAL="$ENV_ROOT/bin/agent-edit" command claude "$@"; }
+codex() { VISUAL="$ENV_ROOT/bin/agent-edit" command codex "$@"; }
 export GREP_COLOR="1;33"
 export HISTCONTROL=ignoreboth
 export TERM=xterm-256color

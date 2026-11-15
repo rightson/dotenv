@@ -52,10 +52,17 @@ function Update-Dotenv {
     Write-Host "Updated. Open a new PowerShell window to load the changes."
 }
 
+function Invoke-ConfigVisual {
+    # Choose the editor that coding agents open with Ctrl+G (saved in ~\.config\agent-edit\config).
+    & (Join-Path $PSScriptRoot 'bin\agent-edit.ps1') -Config
+    exit $LASTEXITCODE
+}
+
 function Print-Usage {
-    Write-Host "Usage: .\ManagePowerShellProfile.ps1 [patch]"
-    Write-Host "  patch: Patch the PowerShell profile"
+    Write-Host "Usage: dotenv.ps1 [patch|update|config|config-visual]"
+    Write-Host "  patch:  Patch the PowerShell profile"
     Write-Host "  update: Pull the latest dotenv, then patch the profile"
+    Write-Host "  config, config-visual: Choose the editor that coding agents (Claude Code, Codex) open with Ctrl+G"
     Write-Host "  If no argument is provided, patch will be executed by default."
 }
 
@@ -70,6 +77,12 @@ else {
         }
         "update" {
             Update-Dotenv
+        }
+        "config" {
+            Invoke-ConfigVisual
+        }
+        "config-visual" {
+            Invoke-ConfigVisual
         }
         "-h" {
             Print-Usage
