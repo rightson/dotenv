@@ -284,10 +284,12 @@ run_editor() {
             "$(find_mvim)" -f "$2"
             ;;
         gedit)
-            # A standalone instance with --wait blocks until the window is
-            # closed, even when another gedit is already running.
+            # A standalone instance is its own process, so it blocks until
+            # the window is closed, even when another gedit is already
+            # running. Do not add --wait: gedit 41 segfaults on
+            # --standalone --wait.
             warn "opened in gedit; save, then close the window to return"
-            gedit --standalone --wait "$2"
+            gedit --standalone "$2"
             ;;
         vim)
             vim "$2"

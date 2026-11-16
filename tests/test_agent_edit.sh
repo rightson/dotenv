@@ -71,7 +71,7 @@ stderr_has() {   # stderr_has DESCRIPTION TEXT: the last run warned TEXT
 # --- local editors ------------------------------------------------------------
 
 # Default on Linux: gedit; draft kept; edit written back.
-expect "default is gedit" "$(edit_with)" "gedit --standalone --wait $drafts/*.md"
+expect "default is gedit" "$(edit_with)" "gedit --standalone $drafts/*.md"
 expect "edit written back" "$(tail -n 1 "$test_root/prompt.md")" "edited by gedit"
 draft=$(ls "$drafts"/*.md)
 cmp -s "$draft" "$test_root/prompt.md" || fail "draft differs from the written-back file"
