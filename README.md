@@ -56,19 +56,21 @@ powershell -File $HOME\.env\dotenv.ps1 config   # choose the editor for Claude C
 
 | Where | `editor` / `remote_editor` | How to return to the agent |
 | --- | --- | --- |
-| macOS | `textmate` (default), `code`, `macvim`, `vim` | TextMate: save, close the window. VS Code: save, close the tab. MacVim: `:wq`. |
-| Linux | `gedit` (default), `code`, `vim` | Save, close the window or tab. gedit needs a display. |
+| macOS | `textmate` (default), `subl`, `code`, `macvim`, `vim` | TextMate: save, close the window. Sublime Text, VS Code: save, close the tab. MacVim: `:wq`. |
+| Linux | `gedit` (default), `subl`, `code`, `gvim`, `vim` | Save, close the window or tab. gVim: `:wq`. GUI editors need a display. |
 | Windows | `notepad` (default), `code` | Save, close it. If Notepad returns early (Windows 11 tabs), press Enter in the terminal. |
 | code-server, Remote-SSH, WSL terminal | `remote_editor`: `code` (default, a tab in that editor), `vim` | Close the tab. |
 
-`dotenv patch` on macOS downloads TextMate to `/Applications` (or `~/Applications` when that is not writable) unless it is already installed. Offline, patch continues and agent-edit uses `$EDITOR` until TextMate is installed. A custom `--target-root` installs nothing.
+On macOS and Linux the editors form a fallback chain: the configured `editor` is tried first, then the others in the order of the table, ending with vim in the terminal (`editor=code` on Linux gives code, gedit, subl, gvim, vim). An editor is passed over, with one line in the terminal that says why, when it is not installed, when it is a GUI editor without a display (Linux) or in an SSH session (macOS), or when it exits with a non-zero status, such as a crash. Every editor opens the same draft, so text saved before a crash is kept. vim ends the chain: a non-zero exit from it (`:cq`) cancels the edit, and `$EDITOR` (or `vi`) is used only when vim is not installed. A VS Code server that is no longer reachable from a stale terminal falls back to vim.
+
+`dotenv patch` on macOS downloads TextMate to `/Applications` (or `~/Applications` when that is not writable) unless it is already installed. Offline, patch continues and agent-edit uses the next editor of the chain until TextMate is installed. A custom `--target-root` installs nothing.
 
 Change the editor with:
 - `bash ~/.env/dotenv config-visual` or `agent-edit --config` (interactive), `agent-edit --config editor=code remote_editor=vim`
 - `powershell -File $HOME\.env\dotenv.ps1 config-visual` or `agent-edit -Config` (interactive), `agent-edit -Config -Editor code`
 - `agent-edit --show` / `agent-edit -Show` prints the settings and the editor the current terminal would use.
 
-Settings live in `~/.config/agent-edit/config` (`editor=...`, `remote_editor=...`); `AGENT_EDIT_EDITOR` and `AGENT_EDIT_REMOTE_EDITOR` override them. Other overrides: `AGENT_EDIT_CONFIG` (config file), `AGENT_EDIT_DIR` (drafts folder), `AGENT_EDIT_PROFILE` (VS Code profile, default `scratch`), `AGENT_EDIT_KEEP` (retention in days, default 730). An editor that cannot run falls back to `$EDITOR` (or `vi`; on Windows, Notepad) with a notice: no TextMate, VS Code CLI or MacVim, a GUI editor without a display (Linux) or in an SSH session (macOS), or a VS Code server that is no longer reachable from a stale terminal. Tests: `bash tests/test_agent_edit.sh`, `bash tests/test_install_textmate.sh`, `pwsh -File tests/test_agent_edit.ps1`.
+Settings live in `~/.config/agent-edit/config` (`editor=...`, `remote_editor=...`); `AGENT_EDIT_EDITOR` and `AGENT_EDIT_REMOTE_EDITOR` override them. Other overrides: `AGENT_EDIT_CONFIG` (config file), `AGENT_EDIT_DIR` (drafts folder), `AGENT_EDIT_PROFILE` (VS Code profile, default `scratch`), `AGENT_EDIT_KEEP` (retention in days, default 730). On Windows, an editor that cannot run falls back to Notepad with a notice. Tests: `bash tests/test_agent_edit.sh`, `bash tests/test_install_textmate.sh`, `pwsh -File tests/test_agent_edit.ps1`.
 
 ## macOS Keyboard Shortcuts
 The included Karabiner and Hammerspoon configurations provide powerful keyboard shortcuts for window management and productivity.

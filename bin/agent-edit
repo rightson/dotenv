@@ -4,7 +4,8 @@
 # Ctrl+G in a coding agent runs $VISUAL on its temp prompt file and reads the
 # file back when the editor exits. agent-edit copies that file into a persistent drafts
 # folder, opens the copy in the configured editor, waits until editing is
-# done, then copies the result back.
+# done, then copies the result back. An editor that cannot open, or that
+# fails, hands the same draft to the next editor (see "Fallback" below).
 #
 # Usage:
 #   agent-edit <file>                  edit <file> (what the agent runs)
@@ -14,8 +15,10 @@
 #                                   terminal would use
 #
 # Settings (the env var overrides the config file; the default depends on the OS):
-#   editor         AGENT_EDIT_EDITOR         macOS: textmate (default) code macvim vim
-#                                            Linux: gedit (default) code vim
+#   editor         AGENT_EDIT_EDITOR         macOS: textmate (default) subl code
+#                                                   macvim vim
+#                                            Linux: gedit (default) subl code
+#                                                   gvim vim
 #   remote_editor  AGENT_EDIT_REMOTE_EDITOR  in VS Code server terminals
 #                                            (code-server, Remote-SSH, WSL):
 #                                            code (default, a tab in the owning
@@ -28,10 +31,14 @@
 #   AGENT_EDIT_KEEP     draft retention in days (default: 730, i.e. 2 years;
 #                    not a number: no pruning)
 #
-# An editor that cannot run here falls back to $EDITOR (or vi) in the
-# terminal, with a notice: no VS Code CLI, no TextMate, no MacVim, a GUI editor without a
-# display (Linux) or in an SSH session (macOS), or an unreachable VS Code
-# server.
+# Fallback: the configured editor is tried first, then the other editors of
+# the platform in the order listed above, ending with vim in the terminal. An
+# editor is passed over, with one line that says why, when it is not
+# installed, when it is a GUI editor without a display (Linux) or in an SSH
+# session (macOS), or when it exits with a non-zero status (a crash). Every
+# editor opens the same draft, so text saved before a crash is kept. vim ends
+# the chain: its exit status is final, and $EDITOR (or vi) is used only when
+# vim is not installed. An unreachable VS Code server falls back to vim.
 #
 # Keep this script compatible with bash 3.2 (macOS /bin/bash).
 
@@ -44,8 +51,8 @@ keep_days="${AGENT_EDIT_KEEP:-730}"
 os="${AGENT_EDIT_OS:-$(uname -s)}"     # AGENT_EDIT_OS is for tests only
 
 case "$os" in
-    Darwin) local_editors="textmate code macvim vim" ;;
-    *)      local_editors="gedit code vim" ;;
+    Darwin) local_editors="textmate subl code macvim vim" ;;
+    *)      local_editors="gedit subl code gvim vim" ;;
 esac
 remote_editors="code vim"
 
@@ -194,6 +201,21 @@ find_mvim() {
     return 1
 }
 
+# find_subl: print the Sublime Text CLI. The macOS app does not put subl on
+# PATH.
+find_subl() {
+    local path
+    for path in "$(command -v subl 2>/dev/null)" \
+                "/Applications/Sublime Text.app/Contents/SharedSupport/bin/subl" \
+                "$HOME/Applications/Sublime Text.app/Contents/SharedSupport/bin/subl"; do
+        if [ -n "$path" ] && [ -x "$path" ]; then
+            echo "$path"
+            return 0
+        fi
+    done
+    return 1
+}
+
 # has_gui: succeed if a window opened from here reaches the user: on macOS,
 # not an SSH session; elsewhere, an X11 or Wayland display.
 has_gui() {
@@ -203,33 +225,99 @@ has_gui() {
     esac
 }
 
-# available NAME: succeed if editor NAME can run in this terminal.
-available() {
+# can_show NAME: succeed if a window of editor NAME reaches the user. vim runs
+# in the terminal; under WSL, code opens VS Code on Windows, which needs no
+# display.
+can_show() {
     case "$1" in
-        remote)   find_remote_cli >/dev/null ;;
-        # Under WSL, code opens VS Code on Windows, which needs no display.
-        code)     { has_gui || [ -n "${WSL_DISTRO_NAME:-}" ]; } && find_code >/dev/null ;;
-        textmate) [ "$os" = Darwin ] && has_gui && find_mate >/dev/null ;;
-        macvim)   has_gui && find_mvim >/dev/null ;;
-        gedit)    has_gui && command -v gedit >/dev/null 2>&1 ;;
-        vim)      command -v vim >/dev/null 2>&1 ;;
+        vim)  return 0 ;;
+        code) [ -z "${WSL_DISTRO_NAME:-}" ] || return 0 ;;
+    esac
+    has_gui
+}
+
+# installed NAME: succeed if editor NAME is installed.
+installed() {
+    case "$1" in
+        code)     find_code >/dev/null ;;
+        subl)     find_subl >/dev/null ;;
+        textmate) [ "$os" = Darwin ] && find_mate >/dev/null ;;
+        macvim)   find_mvim >/dev/null ;;
+        gedit|gvim|vim) command -v "$1" >/dev/null 2>&1 ;;
         *)        return 1 ;;
     esac
 }
 
-# fall_back REASON: use $EDITOR (or vi) in the terminal instead.
-fall_back() {
-    choice=terminal
-    reason="$1"
-    warn "$reason; using ${EDITOR:-vi}"
+# available NAME: succeed if editor NAME can run in this terminal.
+available() {
+    case "$1" in
+        remote) find_remote_cli >/dev/null ;;
+        *)      can_show "$1" && installed "$1" ;;
+    esac
+}
+
+# why_not NAME: print why editor NAME is not available here.
+why_not() {
+    if ! can_show "$1"; then
+        case "$os" in
+            Darwin) echo "$1 cannot open a window in an SSH session" ;;
+            *)      echo "$1 needs a display" ;;
+        esac
+    elif [ "$1" = textmate ]; then
+        echo "textmate is not installed (run: dotenv patch to install TextMate)"
+    else
+        echo "$1 is not installed"
+    fi
+}
+
+# chain_from NAME: print the editors to try, NAME first: NAME, then the other
+# editors of this platform in their fixed order. vim ends the chain, so
+# nothing follows it.
+chain_from() {
+    local name list="$1"
+    if [ "$1" != vim ]; then
+        for name in $local_editors; do
+            [ "$name" = "$1" ] || list="$list $name"
+        done
+    fi
+    echo "$list"
+}
+
+# next_editor [CAUSE]: set $choice to the next editor of $chain that can run
+# here, or to "terminal" ($EDITOR) when none is left. CAUSE says why the
+# previous editor failed. Each editor passed over gets one line with its
+# cause; $reason keeps the first cause.
+next_editor() {
+    local cause="${1:-}" name
+    while :; do
+        name="${chain%% *}"
+        case "$chain" in
+            *" "*) chain="${chain#* }" ;;
+            *)     chain="" ;;
+        esac
+        if [ -n "$cause" ]; then
+            warn "$cause; trying ${name:-${EDITOR:-vi}}"
+            [ -n "$reason" ] || reason="$cause"
+        fi
+        if [ -z "$name" ]; then
+            choice=terminal
+            return
+        fi
+        if available "$name"; then
+            choice="$name"
+            return
+        fi
+        cause=$(why_not "$name")
+    done
 }
 
 # pick_editor: set $choice to the editor for this terminal: an editor name,
-# "remote" (a tab in the VS Code server that owns it) or "terminal" ($EDITOR,
-# with the cause in $reason).
+# "remote" (a tab in the VS Code server that owns it) or "terminal" ($EDITOR);
+# $chain holds the editors to try after it and $reason the cause when $choice
+# is not the configured editor.
 pick_editor() {
     local want
-    choice="" reason=""
+    choice="" reason="" chain=""
     if available remote; then
         want=$(setting remote_editor)
         if ! in_list "$want" "$remote_editors"; then
@@ -238,22 +326,33 @@ pick_editor() {
         fi
         if [ "$want" = code ]; then
             choice=remote
+            chain=vim
             return
         fi
+        chain=vim
     else
         want=$(setting editor)
         if ! in_list "$want" "$local_editors"; then
             warn "unknown editor '$want' (choose from: $local_editors); using $(default_for editor)"
             want=$(default_for editor)
         fi
+        chain=$(chain_from "$want")
     fi
-    if available "$want"; then
-        choice="$want"
-    elif [ "$want" = textmate ]; then
-        fall_back "textmate is not available here (run: dotenv patch to install TextMate)"
-    else
-        fall_back "$want is not available here"
-    fi
+    next_editor
+}
+
+# run_in_terminal FILE COMMAND...: edit FILE with a terminal editor. A
+# full-screen editor hides the fallback lines at once, so vim and nvim repeat
+# the first cause on their message line once they have started.
+run_in_terminal() {
+    local file="$1"
+    shift
+    case "$reason:$(basename "$1")" in
+        ?*:vim|?*:nvim)
+            "$@" -c "autocmd VimEnter * echomsg 'agent-edit: $reason'" "$file" ;;
+        *)
+            "$@" "$file" ;;
+    esac
 }
 
 # run_editor NAME FILE: open FILE in editor NAME and wait until editing is done.
@@ -261,17 +360,16 @@ run_editor() {
     case "$1" in
         remote)
             warn "opened in a VS Code tab; close the tab to return"
-            # The server CLI exits non-zero only when it cannot reach the
-            # server, e.g. a stale $VSCODE_IPC_HOOK_CLI after a window reload
-            # or in a tmux session that outlived it. The draft is untouched.
-            if ! "$(find_remote_cli)" --wait "$2"; then
-                fall_back "the VS Code server of this terminal is not reachable"
-                run_editor terminal "$2"
-            fi
+            "$(find_remote_cli)" --wait "$2"
             ;;
         code)
             warn "opened in VS Code; save, then close the tab to return"
             "$(find_code)" --new-window --wait --profile "$profile" "$2"
+            ;;
+        subl)
+            # --wait blocks until the file's tab is closed.
+            warn "opened in Sublime Text; save, then close the tab to return"
+            "$(find_subl)" --new-window --wait "$2"
             ;;
         textmate)
             # -w waits until the document's window (tab) is closed.
@@ -291,19 +389,29 @@ run_editor() {
             warn "opened in gedit; save, then close the window to return"
             gedit --standalone "$2"
             ;;
+        gvim)
+            # -f keeps gvim in the foreground until the window is closed.
+            warn "opened in gVim; :wq to return"
+            gvim -f "$2"
+            ;;
         vim)
-            vim "$2"
+            run_in_terminal "$2" vim
             ;;
         terminal)
-            # A full-screen editor hides the warning at once, so vim and nvim
-            # repeat it on their message line once they have started.
-            case "$(basename "${EDITOR:-vi}")" in
-                vim|nvim)
-                    "${EDITOR:-vi}" -c "autocmd VimEnter * echomsg 'agent-edit: $reason'" "$2" ;;
-                *)
-                    "${EDITOR:-vi}" "$2" ;;
-            esac
+            run_in_terminal "$2" "${EDITOR:-vi}"
             ;;
+    esac
+}
+
+# why_failed NAME STATUS: print why editor NAME, which exited with STATUS,
+# did not do its job.
+why_failed() {
+    case "$1" in
+        # The server CLI exits non-zero only when it cannot reach the server,
+        # e.g. a stale $VSCODE_IPC_HOOK_CLI after a window reload or in a
+        # tmux session that outlived it.
+        remote) echo "the VS Code server of this terminal is not reachable" ;;
+        *)      echo "$1 exited with status $2" ;;
     esac
 }
 
@@ -314,6 +422,8 @@ describe() {
     case "$1:$2" in
         editor:code)        echo "VS Code, new window with the '$profile' profile" ;;
         editor:textmate)    echo "TextMate" ;;
+        editor:subl)        echo "Sublime Text" ;;
+        editor:gvim)        echo "gVim (needs a display)" ;;
         editor:macvim)      echo "MacVim" ;;
         editor:gedit)       echo "gedit (needs a display)" ;;
         editor:vim)         echo "vim in the terminal" ;;
@@ -372,12 +482,16 @@ show() {
         in_list "$value" "$(options "$key")" || printf '  [invalid; %s is used]' "$(default_for "$key")"
         echo
     done
+    value=$(setting editor)
+    in_list "$value" "$local_editors" || value=$(default_for editor)
+    echo "editor tries in order: $(chain_from "$value")"
     pick_editor 2>/dev/null
     case "$choice" in
-        remote)   echo "this terminal uses: a tab in the VS Code server that owns it" ;;
-        terminal) echo "this terminal uses: ${EDITOR:-vi} (fallback: $reason)" ;;
-        *)        echo "this terminal uses: $choice" ;;
+        remote)   value="a tab in the VS Code server that owns it" ;;
+        terminal) value="${EDITOR:-vi}" ;;
+        *)        value="$choice" ;;
     esac
+    echo "this terminal uses: $value${reason:+ (fallback: $reason)}"
 }
 
 # configure [KEY=VALUE...]: validate every setting, then save them all.
@@ -429,7 +543,7 @@ migrate_drafts() {
 }
 
 edit() {
-    local src="$1" dst prune=1
+    local src="$1" dst status prune=1
     case "$keep_days" in
         ''|*[!0-9]*)
             warn "AGENT_EDIT_KEEP='$keep_days' is not a number of days; not pruning drafts"
@@ -443,7 +557,16 @@ edit() {
     dst="$dir/$(date +%Y%m%d-%H%M%S)-$$.md"
 
     cp "$src" "$dst" || return 1
-    run_editor "$choice" "$dst" || return $?
+    # An editor that fails hands the same draft to the next one, so whatever
+    # it saved is kept. vim and $EDITOR end the chain: their status is final
+    # (e.g. :cq to abort), and then the prompt is left as it was.
+    while :; do
+        run_editor "$choice" "$dst"
+        status=$?
+        [ "$status" -ne 0 ] || break
+        case "$choice" in vim|terminal) return "$status" ;; esac
+        next_editor "$(why_failed "$choice" "$status")"
+    done
     cp "$dst" "$src" || return 1
 
     # Prune drafts not modified for more than $keep_days days.
